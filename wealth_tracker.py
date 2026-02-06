@@ -240,7 +240,47 @@ st.markdown("""
             100% { transform: translateX(55%); opacity: 0.0; }
         }
 
-        @media (max-width: 900px) {
+        
+        .wp-plan-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.25rem 0.7rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            background: rgba(255, 214, 92, 0.18);
+            color: #f5d982;
+            border: 1px solid rgba(255, 214, 92, 0.35);
+            letter-spacing: 0.3px;
+        }
+
+        .wp-plan-badge.light {
+            background: rgba(15, 26, 51, 0.08);
+            color: #1d2b4f;
+            border: 1px solid rgba(15, 26, 51, 0.2);
+        }
+
+        .wp-plan-sub {
+            font-size: 0.72rem;
+            color: var(--muted);
+            margin-top: 0.2rem;
+        }
+
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.6rem 1rem;
+            border-radius: 10px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-weight: 600;
+            text-decoration: none;
+            gap: 0.45rem;
+            box-shadow: 0 10px 18px rgba(0,0,0,0.15);
+        }
+@media (max-width: 900px) {
             .wp-header-logo {
                 height: 80px;
             }
@@ -1581,7 +1621,8 @@ DEFAULT_SETTINGS = {
     "subscription_plan": "Starter",
     "subscription_status": "active",
     "subscription_renews": "",
-    "subscription_source": "Local"
+    "subscription_source": "Local",
+    "stripe_customer_portal_url": ""
 }
 
 SUBSCRIPTION_PLANS = ["Starter", "Pro", "Elite", "Founder"]
@@ -1683,6 +1724,25 @@ def render_header_logo(show_pulse=False, settings=None):
             "<div class='wp-header-bar'><h2 style='margin:0; color: var(--text);'>WealthPulse</h2></div>"
         )
 
+
+
+def render_plan_badge(settings):
+    plan = normalize_plan((settings or {}).get("subscription_plan"))
+    status = (settings or {}).get("subscription_status", "active")
+    renews = (settings or {}).get("subscription_renews", "")
+    light = is_light_theme(settings or {})
+    badge_class = "wp-plan-badge light" if light else "wp-plan-badge"
+    status_text = status.upper() if status else "ACTIVE"
+    subline = f"Status: {status_text}"
+    if renews:
+        subline = f"Status: {status_text} • Renews: {renews}"
+    html_block = (
+        '<div>'
+        f'<div class="{badge_class}">Plan: {plan}</div>'
+        f'<div class="wp-plan-sub">{subline}</div>'
+        '</div>'
+    )
+    render_html_block(html_block)
 def render_login_logo():
     data = load_asset_base64(os.path.join("assets", "wealthpulse_logo_transparent_glow.png"))
     if not data:
@@ -5598,6 +5658,7 @@ if st.session_state.get("show_login_animation"):
 
 render_header_logo(False, user_settings)
 
+
 logout_cols = st.columns([4, 1, 1, 1, 1])
 with logout_cols[1]:
     if st.button("Settings", width="stretch"):
@@ -5900,6 +5961,7 @@ st.markdown("""
         </div>
     </div>
 """, unsafe_allow_html=True)
+render_plan_badge(user_settings)
 render_scroll_to_top()
 render_https_warning_banner()
 render_https_enforcement()
@@ -8178,8 +8240,13 @@ with tab8:
         "Renewal date (optional)",
         value=settings.get("subscription_renews", "")
     )
+    stripe_portal_url = st.text_input(
+        "Stripe customer portal URL (optional)",
+        value=settings.get("stripe_customer_portal_url", "")
+    )
+    if stripe_portal_url.strip():
+        st.markdown(f"<a class='wp-stripe-link' href='{stripe_portal_url.strip()}' target='_blank'>Manage Subscription</a>", unsafe_allow_html=True)
     st.caption("This panel will sync with Stripe in production. For now, it controls feature access locally.")
-
     st.markdown("### API Keys & Live Data")
     st.caption("For production, store keys in `.streamlit/secrets.toml` so they never touch local data files.")
     with st.expander("Secrets file template (recommended for deployment)"):
@@ -8899,7 +8966,8 @@ with tab8:
             "subscription_plan": normalize_plan(plan_choice),
             "subscription_status": subscription_status,
             "subscription_renews": subscription_renews.strip(),
-            "subscription_source": settings.get("subscription_source", "Local")
+            "subscription_source": settings.get("subscription_source", "Local"),
+            "stripe_customer_portal_url": stripe_portal_url.strip()
         }
         meta = get_meta(db)
         meta["community_config"] = {
