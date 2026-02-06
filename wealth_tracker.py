@@ -156,6 +156,15 @@ st.markdown("""
             height: 140px;
         }
 
+        .wp-footer {
+            text-align: center;
+            margin: 2.5rem 0 1.5rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: var(--muted);
+            font-size: 0.85rem;
+        }
+
         .wp-login-wrap {
             display: flex;
             align-items: center;
@@ -1756,6 +1765,12 @@ def render_login_logo():
             </div>
         </div>
         """,
+        unsafe_allow_html=True
+    )
+
+def render_footer():
+    st.markdown(
+        "<div class='wp-footer'>© L P Scott — ScottWebDesign</div>",
         unsafe_allow_html=True
     )
 
@@ -5560,10 +5575,7 @@ if not st.session_state.user:
                             save_data(db)
                             community_sync_user(community_settings, db, new_username)
                             st.success("Account created. Please log in.")
-        st.markdown(
-            "<div style='text-align:center; margin-top:2rem; font-weight:700; letter-spacing:0.5px; color: var(--muted);'>© L P Scott — ScottWebDesign</div>",
-            unsafe_allow_html=True
-        )
+        render_footer()
     st.stop()
 
 user = st.session_state.user
@@ -5686,11 +5698,6 @@ with logout_cols[4]:
         st.session_state.user = None
         st.session_state.is_admin = False
         st.rerun()
-
-st.markdown(
-    "<div style='text-align:center; margin-top:0.5rem; font-weight:700; letter-spacing:0.5px; color: var(--muted);'>© L P Scott — ScottWebDesign</div>",
-    unsafe_allow_html=True
-)
 
 weight_unit = user_settings.get("metal_weight_unit", "toz")
 auto_refresh_enabled = user_settings.get("auto_refresh_enabled", True)
@@ -11520,3 +11527,5 @@ if "delete_confirmation" in st.session_state and st.session_state.delete_confirm
             }
         </script>
     """, unsafe_allow_html=True)
+
+render_footer()
