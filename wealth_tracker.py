@@ -6042,6 +6042,9 @@ if st.session_state.get("jump_to_portfolio"):
 if st.session_state.get("jump_to_bullion"):
     tab_jump_index = 1
     st.session_state.jump_to_bullion = False
+if st.session_state.get("jump_to_community"):
+    tab_jump_index = 2
+    st.session_state.jump_to_community = False
 if st.session_state.get("jump_to_modify"):
     tab_jump_index = 7
     st.session_state.jump_to_modify = False
@@ -9511,6 +9514,8 @@ if forum_tab is not None:
             st.session_state.edit_listing_origin = "browse"
         if "market_selected_post_id" not in st.session_state:
             st.session_state.market_selected_post_id = None
+        if "market_view_post_id" not in st.session_state:
+            st.session_state.market_view_post_id = None
         if "market_watchlist" not in st.session_state:
             stored_watchlist = user_settings.get("market_watchlist") or []
             st.session_state.market_watchlist = set(stored_watchlist)
@@ -9990,35 +9995,38 @@ if forum_tab is not None:
                 f'<div class="market-meta">{country} · {category} · @{seller}</div>'
                 '</div></div>'
             )
-            render_html_block(card_html)
-            actions = st.columns([1, 1])
-            with actions[0]:
-                if st.button("View", key=f"{key_prefix}_view_listing_{post_id}"):
-                    st.session_state.market_selected_post_id = post_id
-                    request_scroll_to_top()
-                    st.rerun()
-            with actions[1]:
-                if user == post.get("created_by"):
-                    if is_elite:
-                        if st.button("Edit", key=f"{key_prefix}_edit_listing_card_{post_id}"):
-                            st.session_state.edit_listing_id = post_id
-                            st.session_state.edit_listing_origin = "browse"
-                            request_scroll_to_top()
-                            st.rerun()
-                    else:
-                        st.caption("Elite required to edit listings.")
-                else:
-                    watchlist = st.session_state.market_watchlist
-                    is_watching = post_id in watchlist
-                    label = "Watching" if is_watching else "Watch"
-                    if st.button(label, key=f"{key_prefix}_watch_listing_{post_id}"):
-                        if is_watching:
-                            watchlist.discard(post_id)
-                        else:
-                            watchlist.add(post_id)
-                        st.session_state.market_watchlist = watchlist
-                        persist_market_watchlist(db, user, watchlist)
+        render_html_block(card_html)
+        actions = st.columns([1, 1])
+        with actions[0]:
+            if st.button("View", key=f"{key_prefix}_view_listing_{post_id}"):
+                st.session_state.market_selected_post_id = post_id
+                st.session_state.market_view_post_id = post_id
+                st.session_state.jump_to_community = True
+                request_scroll_to_top()
+                st.rerun()
+        with actions[1]:
+            if user == post.get("created_by"):
+                if is_elite:
+                    if st.button("Edit", key=f"{key_prefix}_edit_listing_card_{post_id}"):
+                        st.session_state.edit_listing_id = post_id
+                        st.session_state.edit_listing_origin = "browse"
+                        st.session_state.jump_to_community = True
+                        request_scroll_to_top()
                         st.rerun()
+                else:
+                    st.caption("Elite required to edit listings.")
+            else:
+                watchlist = st.session_state.market_watchlist
+                is_watching = post_id in watchlist
+                label = "Watching" if is_watching else "Watch"
+                if st.button(label, key=f"{key_prefix}_watch_listing_{post_id}"):
+                    if is_watching:
+                        watchlist.discard(post_id)
+                    else:
+                        watchlist.add(post_id)
+                    st.session_state.market_watchlist = watchlist
+                    persist_market_watchlist(db, user, watchlist)
+                    st.rerun()
 
         def render_listing_detail_panel(post, status):
             post_id = post.get("id", "")
@@ -10345,10 +10353,31 @@ if forum_tab is not None:
             if not target_post:
                 st.session_state.edit_listing_id = None
                 return
+            if supports_owner_id and auth_user_id and target_post.get("owner_id") and target_post.get("owner_id") != auth_user_id:
+                st.error("Only the listing owner can edit this post.")
+                st.session_state.edit_listing_id = None
+                return
+            if user != target_post.get("created_by"):
+                st.error("Only the listing owner can edit this post.")
+                st.session_state.edit_listing_id = None
+                return
             dialog_ctx, dialog_supported = open_streamlit_dialog("Edit Listing")
             if dialog_supported:
                 with dialog_ctx:
                     render_listing_edit_form(target_post, f"modal_{st.session_state.get('edit_listing_origin', 'browse')}")
+                    st.markdown("---")
+                    confirm_delete = st.checkbox("I understand this will permanently delete the listing.", key=f"confirm_delete_{post_id}")
+                    if st.button("Delete Listing", key=f"delete_listing_modal_{post_id}"):
+                        if not confirm_delete:
+                            st.warning("Please confirm the deletion.")
+                        else:
+                            _, err = community_delete_post(community_settings, db, post_id)
+                            if err:
+                                st.error(err)
+                            else:
+                                st.success("Listing deleted.")
+                                st.session_state.edit_listing_id = None
+                                st.rerun()
                     if st.button("Close", key=f"close_edit_listing_{post_id}"):
                         st.session_state.edit_listing_id = None
                         st.rerun()
@@ -10361,6 +10390,19 @@ if forum_tab is not None:
                             target_post,
                             f"modal_{st.session_state.get('edit_listing_origin', 'browse')}"
                         )
+                        st.markdown("---")
+                        confirm_delete = st.checkbox("I understand this will permanently delete the listing.", key=f"confirm_delete_{post_id}")
+                        if st.button("Delete Listing", key=f"delete_listing_modal_{post_id}"):
+                            if not confirm_delete:
+                                st.warning("Please confirm the deletion.")
+                            else:
+                                _, err = community_delete_post(community_settings, db, post_id)
+                                if err:
+                                    st.error(err)
+                                else:
+                                    st.success("Listing deleted.")
+                                    st.session_state.edit_listing_id = None
+                                    st.rerun()
                         if st.button("Close", key=f"close_edit_listing_{post_id}"):
                             st.session_state.edit_listing_id = None
                             st.rerun()
@@ -10372,12 +10414,61 @@ if forum_tab is not None:
                         target_post,
                         f"modal_{st.session_state.get('edit_listing_origin', 'browse')}"
                     )
+                    st.markdown("---")
+                    confirm_delete = st.checkbox("I understand this will permanently delete the listing.", key=f"confirm_delete_{post_id}")
+                    if st.button("Delete Listing", key=f"delete_listing_modal_{post_id}"):
+                        if not confirm_delete:
+                            st.warning("Please confirm the deletion.")
+                        else:
+                            _, err = community_delete_post(community_settings, db, post_id)
+                            if err:
+                                st.error(err)
+                            else:
+                                st.success("Listing deleted.")
+                                st.session_state.edit_listing_id = None
+                                st.rerun()
                     if st.button("Close", key=f"close_edit_listing_{post_id}"):
                         st.session_state.edit_listing_id = None
                         st.rerun()
                     st.stop()
 
+        def render_listing_view_modal():
+            post_id = st.session_state.get("market_view_post_id")
+            if not post_id:
+                return
+            target_post = next((post for post in forum_posts if post.get("id") == post_id), None)
+            if not target_post:
+                st.session_state.market_view_post_id = None
+                return
+            status = get_post_status(target_post)
+            dialog_ctx, dialog_supported = open_streamlit_dialog("Listing Details")
+            if dialog_supported:
+                with dialog_ctx:
+                    render_listing_detail_panel(target_post, status)
+                    if st.button("Close", key=f"close_view_listing_{post_id}"):
+                        st.session_state.market_view_post_id = None
+                        st.rerun()
+            else:
+                dialog_fn = getattr(st, "dialog", None)
+                if callable(dialog_fn):
+                    @dialog_fn("Listing Details")
+                    def _view_dialog():
+                        render_listing_detail_panel(target_post, status)
+                        if st.button("Close", key=f"close_view_listing_{post_id}"):
+                            st.session_state.market_view_post_id = None
+                            st.rerun()
+                    _view_dialog()
+                else:
+                    st.markdown("### Listing Details")
+                    render_listing_detail_panel(target_post, status)
+                    if st.button("Close", key=f"close_view_listing_{post_id}"):
+                        st.session_state.market_view_post_id = None
+                        st.rerun()
+                    st.stop()
+
         render_listing_edit_modal()
+        render_listing_view_modal()
+
 
         with forum_tabs[0]:
             if not community_ready:
@@ -11097,6 +11188,7 @@ if forum_tab is not None:
                                 if st.button("Edit Listing", key=f"edit_listing_open_my_{post.get('id')}"):
                                     st.session_state.edit_listing_id = post.get("id")
                                     st.session_state.edit_listing_origin = "my"
+                                    st.session_state.jump_to_community = True
                                     request_scroll_to_top()
                                     st.rerun()
                                 sale_cols = st.columns(3)
