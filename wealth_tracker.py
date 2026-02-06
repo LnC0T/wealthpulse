@@ -152,6 +152,10 @@ st.markdown("""
             filter: drop-shadow(0 12px 20px rgba(0,0,0,0.25));
         }
 
+        .wp-header-logo.large {
+            height: 140px;
+        }
+
         .wp-login-wrap {
             display: flex;
             align-items: center;
@@ -239,6 +243,10 @@ st.markdown("""
         @media (max-width: 900px) {
             .wp-header-logo {
                 height: 80px;
+            }
+
+            .wp-header-logo.large {
+                height: 96px;
             }
         }
 
@@ -1593,44 +1601,33 @@ def load_asset_base64(relative_path):
 
 def render_header_logo(show_pulse=False, settings=None):
     light_theme = is_light_theme(settings or {})
+    pulse_class = " pulse" if show_pulse else ""
+    shimmer_html = "<div class=\"wp-logo-shimmer\"></div>" if show_pulse else ""
     if light_theme:
         data = load_asset_base64(os.path.join("assets", "wealthpulse_header_1800.png"))
         if data:
-            pulse_class = " pulse" if show_pulse else ""
-            st.markdown(
-                f"""
-                <div class="wp-header-bar">
-                    <div class="wp-logo-wrap">
-                        <img class="wp-header-logo{pulse_class}" src="data:image/png;base64,{data}" alt="WealthPulse" />
-                        {"<div class=\"wp-logo-shimmer\"></div>" if show_pulse else ""}
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
+            html_block = (
+                '<div class="wp-header-bar">'
+                '<div class="wp-logo-wrap">'
+                f'<img class="wp-header-logo{pulse_class}" src="data:image/png;base64,{data}" alt="WealthPulse" />'
+                f'{shimmer_html}'
+                '</div></div>'
             )
+            render_html_block(html_block)
             return
     data = load_asset_base64(os.path.join("assets", "wealthpulse_logo_transparent_glow.png"))
     if data:
-        pulse_class = " pulse" if show_pulse else ""
-        st.markdown(
-            f"""
-            <div class="wp-header-bar">
-                <div class="wp-logo-wrap">
-                    <img class="wp-header-logo{pulse_class}" src="data:image/png;base64,{data}" alt="WealthPulse" />
-                    {"<div class=\"wp-logo-shimmer\"></div>" if show_pulse else ""}
-                </div>
-                <div class="wp-header-text">
-                    <div class="wp-header-title">WealthPulse</div>
-                    <div class="wp-header-subtitle">Portfolio Intelligence & Community Market</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        html_block = (
+            '<div class="wp-header-bar">'
+            '<div class="wp-logo-wrap">'
+            f'<img class="wp-header-logo large{pulse_class}" src="data:image/png;base64,{data}" alt="WealthPulse" />'
+            f'{shimmer_html}'
+            '</div></div>'
         )
+        render_html_block(html_block)
     else:
-        st.markdown(
-            "<div class='wp-header-bar'><h2 style='margin:0; color: var(--text);'>WealthPulse</h2></div>",
-            unsafe_allow_html=True
+        render_html_block(
+            "<div class='wp-header-bar'><h2 style='margin:0; color: var(--text);'>WealthPulse</h2></div>"
         )
 
 def render_login_logo():
