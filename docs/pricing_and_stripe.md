@@ -5,17 +5,17 @@ You can adjust, but this fits the market and the unique value of WealthPulse.
 
 1. **Starter**
    - Target: basic users
-   - Price: $6-9/mo or $60-90/yr
+   - Price: $5-8/mo or $51-77/yr
    - Features: core tracking, local storage, basic reports
 
 2. **Pro**
    - Target: business owners and serious planners
-   - Price: $12-20/mo or $120-200/yr
+   - Price: $10-17/mo or $102-170/yr
    - Features: entities, trust tools, premium analytics, exports
 
 3. **Elite**
    - Target: advanced users + community tools
-   - Price: $25-40/mo or $240-400/yr
+   - Price: $21-34/mo or $204-340/yr
    - Features: marketplace, advanced alerts, premium data, advisor pack
 
 4. **Founder**
