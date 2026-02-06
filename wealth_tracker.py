@@ -152,6 +152,21 @@ st.markdown("""
             filter: drop-shadow(0 12px 20px rgba(0,0,0,0.25));
         }
 
+        .wp-login-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1.2rem;
+        }
+
+        .wp-login-logo {
+            height: 220px;
+            width: auto;
+            max-width: 90%;
+            filter: drop-shadow(0 18px 28px rgba(0,0,0,0.35));
+            animation: wpGoldPulse 1.8s ease-out infinite;
+        }
+
         .wp-header-text {
             display: flex;
             flex-direction: column;
@@ -1587,7 +1602,7 @@ def render_header_logo(show_pulse=False, settings=None):
                 <div class="wp-header-bar">
                     <div class="wp-logo-wrap">
                         <img class="wp-header-logo{pulse_class}" src="data:image/png;base64,{data}" alt="WealthPulse" />
-                        <div class="wp-logo-shimmer"></div>
+                        {"<div class=\"wp-logo-shimmer\"></div>" if show_pulse else ""}
                     </div>
                 </div>
                 """,
@@ -1602,7 +1617,7 @@ def render_header_logo(show_pulse=False, settings=None):
             <div class="wp-header-bar">
                 <div class="wp-logo-wrap">
                     <img class="wp-header-logo{pulse_class}" src="data:image/png;base64,{data}" alt="WealthPulse" />
-                    <div class="wp-logo-shimmer"></div>
+                    {"<div class=\"wp-logo-shimmer\"></div>" if show_pulse else ""}
                 </div>
                 <div class="wp-header-text">
                     <div class="wp-header-title">WealthPulse</div>
@@ -1617,6 +1632,22 @@ def render_header_logo(show_pulse=False, settings=None):
             "<div class='wp-header-bar'><h2 style='margin:0; color: var(--text);'>WealthPulse</h2></div>",
             unsafe_allow_html=True
         )
+
+def render_login_logo():
+    data = load_asset_base64(os.path.join("assets", "wealthpulse_logo_transparent_glow.png"))
+    if not data:
+        return
+    st.markdown(
+        f"""
+        <div class="wp-login-wrap">
+            <div class="wp-logo-wrap">
+                <img class="wp-login-logo" src="data:image/png;base64,{data}" alt="WealthPulse" />
+                <div class="wp-logo-shimmer"></div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 def apply_ui_theme(settings):
     theme = (settings.get("ui_theme") or "Dark Gold").strip()
@@ -5223,6 +5254,7 @@ if not st.session_state.user:
         st.session_state.show_header_pulse = True
 
 if not st.session_state.user:
+    render_login_logo()
     st.markdown("""
         <div style="text-align: center; padding: 2.5rem 1.5rem;">
             <h1 style="font-size: 2.1rem; margin-bottom: 0.4rem; color: var(--text);">WealthPulse</h1>
@@ -5514,9 +5546,7 @@ if st.session_state.get("show_login_animation"):
     """, height=0)
     st.session_state.show_login_animation = False
 
-st.session_state.show_header_pulse = True
-render_header_logo(st.session_state.get("show_header_pulse", False), user_settings)
-st.session_state.show_header_pulse = False
+render_header_logo(False, user_settings)
 
 logout_cols = st.columns([4, 1, 1, 1, 1])
 with logout_cols[1]:
