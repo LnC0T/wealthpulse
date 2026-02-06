@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="gold" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#fff8d2" />
+      <stop offset="35%" stop-color="#ffd65c" />
+      <stop offset="70%" stop-color="#e1a23a" />
+      <stop offset="100%" stop-color="#c07a0c" />
+    </linearGradient>
+    <radialGradient id="goldGlow" cx="30%" cy="25%" r="65%">
+      <stop offset="0%" stop-color="#fffbe8" stop-opacity="0.9" />
+      <stop offset="45%" stop-color="#ffe9b5" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="navy" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#1d2b4f" />
+      <stop offset="100%" stop-color="#0f1a33" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="none" />
+
+  <!-- Coin base -->
+  <circle cx="512" cy="512" r="380" fill="url(#gold)" />
+  <circle cx="512" cy="512" r="340" fill="#fbe6a6" opacity="0.55" />
+  <circle cx="512" cy="512" r="310" fill="#f4cd6b" opacity="0.35" />
+  <circle cx="512" cy="512" r="380" fill="url(#goldGlow)" />
+
+  <!-- Inner badge -->
+  <circle cx="512" cy="512" r="240" fill="url(#navy)" />
+  <circle cx="512" cy="512" r="220" fill="#132142" />
+
+  <!-- Growth bars -->
+  <rect x="640" y="590" width="70" height="120" rx="18" fill="#ffd65c" />
+  <rect x="720" y="520" width="70" height="190" rx="18" fill="#eab95e" />
+  <rect x="800" y="450" width="70" height="260" rx="18" fill="#c07a0c" />
+
+  <!-- WP monogram -->
+  <text x="420" y="580" font-family="Avenir Next, Helvetica, Arial, sans-serif" font-size="220" font-weight="700" fill="#ffedbe">W</text>
+  <text x="520" y="580" font-family="Avenir Next, Helvetica, Arial, sans-serif" font-size="220" font-weight="700" fill="#ffffff">P</text>
+
+  <!-- Pulse line -->
+  <path d="M290 650 L380 650 L410 600 L450 700 L490 630 L540 630" fill="none" stroke="#ffedbe" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

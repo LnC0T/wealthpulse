@@ -18,6 +18,7 @@ import math
 import calendar
 import locale
 import textwrap
+import sys
 from collections import Counter
 from zoneinfo import ZoneInfo
 import xml.etree.ElementTree as ET
@@ -129,6 +130,82 @@ st.markdown("""
                 radial-gradient(1200px 600px at 10% -20%, var(--bg-alt) 0%, var(--bg) 55%),
                 linear-gradient(180deg, var(--bg) 0%, var(--bg-alt) 100%);
             background-attachment: fixed;
+        }
+
+        .wp-header-bar {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 1rem;
+            padding: 0.25rem 0.25rem 0.75rem;
+        }
+
+        .wp-logo-wrap {
+            position: relative;
+            display: inline-block;
+        }
+
+        .wp-header-logo {
+            height: 110px;
+            width: auto;
+            max-width: 100%;
+            filter: drop-shadow(0 12px 20px rgba(0,0,0,0.25));
+        }
+
+        .wp-header-logo.pulse {
+            animation: wpGoldPulse 1.7s ease-out 1;
+        }
+
+        .wp-logo-shimmer {
+            pointer-events: none;
+            position: absolute;
+            top: 0;
+            left: -140%;
+            width: 240%;
+            height: 100%;
+            background: linear-gradient(120deg,
+                rgba(255,255,255,0.0) 0%,
+                rgba(255,246,196,0.0) 35%,
+                rgba(255,255,255,0.55) 48%,
+                rgba(255,252,224,0.85) 52%,
+                rgba(255,246,196,0.35) 60%,
+                rgba(255,255,255,0.0) 100%
+            );
+            mix-blend-mode: screen;
+            filter: blur(0.5px);
+            animation: wpShimmer 3.4s linear infinite;
+        }
+
+        @keyframes wpGoldPulse {
+            0% {
+                transform: scale(0.96);
+                filter: drop-shadow(0 0 0 rgba(247, 206, 91, 0.0));
+                opacity: 0.75;
+            }
+            50% {
+                transform: scale(1.03);
+                filter: drop-shadow(0 0 28px rgba(247, 206, 91, 0.85));
+                opacity: 1;
+            }
+            100% {
+                transform: scale(1);
+                filter: drop-shadow(0 12px 20px rgba(0,0,0,0.25));
+                opacity: 1;
+            }
+        }
+
+        @keyframes wpShimmer {
+            0% { transform: translateX(0); opacity: 0.0; }
+            10% { opacity: 0.6; }
+            50% { opacity: 0.95; }
+            90% { opacity: 0.6; }
+            100% { transform: translateX(55%); opacity: 0.0; }
+        }
+
+        @media (max-width: 900px) {
+            .wp-header-logo {
+                height: 80px;
+            }
         }
 
         .main > div {
@@ -1466,6 +1543,40 @@ DEFAULT_SETTINGS = {
 # ==============================
 def escape_html(value):
     return html.escape(str(value)) if value is not None else ""
+
+def get_resource_path(relative_path):
+    base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_dir, relative_path)
+
+@st.cache_data(show_spinner=False)
+def load_asset_base64(relative_path):
+    try:
+        path = get_resource_path(relative_path)
+        with open(path, "rb") as handle:
+            return base64.b64encode(handle.read()).decode("utf-8")
+    except Exception:
+        return ""
+
+def render_header_logo(show_pulse=False):
+    data = load_asset_base64(os.path.join("assets", "wealthpulse_header_1800.png"))
+    if data:
+        pulse_class = " pulse" if show_pulse else ""
+        st.markdown(
+            f"""
+            <div class="wp-header-bar">
+                <div class="wp-logo-wrap">
+                    <img class="wp-header-logo{pulse_class}" src="data:image/png;base64,{data}" alt="WealthPulse" />
+                    <div class="wp-logo-shimmer"></div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            "<div class='wp-header-bar'><h2 style='margin:0; color: var(--text);'>WealthPulse</h2></div>",
+            unsafe_allow_html=True
+        )
 
 def apply_ui_theme(settings):
     theme = (settings.get("ui_theme") or "Dark Gold").strip()
@@ -5061,12 +5172,15 @@ if "open_feedback_form" not in st.session_state:
     st.session_state.open_feedback_form = False
 if "show_login_animation" not in st.session_state:
     st.session_state.show_login_animation = False
+if "show_header_pulse" not in st.session_state:
+    st.session_state.show_header_pulse = False
 
 community_settings = get_community_settings(db)
 if not st.session_state.user:
     remembered_user = get_remembered_user(db)
     if remembered_user:
         st.session_state.user = remembered_user
+        st.session_state.show_header_pulse = True
 
 if not st.session_state.user:
     st.markdown("""
@@ -5114,6 +5228,7 @@ if not st.session_state.user:
                                 save_data(db)
                                 st.session_state.user = username
                                 st.session_state.show_login_animation = True
+                                st.session_state.show_header_pulse = True
                                 record_login(db, username)
                                 save_data(db)
                                 st.rerun()
@@ -5128,6 +5243,7 @@ if not st.session_state.user:
                         clear_login_failures(db, username)
                         st.session_state.user = username
                         st.session_state.show_login_animation = True
+                        st.session_state.show_header_pulse = True
                         record_login(db, username)
                         if remember_me:
                             token, expires = issue_remember_token(record_dict)
@@ -5320,8 +5436,8 @@ if st.session_state.get("show_login_animation"):
                 width: 220px;
                 height: 220px;
                 border-radius: 50%;
-                background: radial-gradient(circle at 30% 30%, #fff6b7 0%, #f7c948 45%, #d19000 100%);
-                border: 6px solid #f9d976;
+                background: radial-gradient(circle at 30% 30%, #fffbe1 0%, #ffd65c 45%, #c07a0c 100%);
+                border: 6px solid #ffe5a0;
                 box-shadow: 0 18px 40px rgba(0,0,0,0.5), inset 0 4px 12px rgba(255,255,255,0.5);
                 display: flex;
                 align-items: center;
@@ -5333,7 +5449,7 @@ if st.session_state.get("show_login_animation"):
                 font-size: 140px;
                 font-weight: 900;
                 color: #6a3d00;
-                text-shadow: 0 3px 0 #ffd166, 0 8px 18px rgba(0,0,0,0.5);
+                text-shadow: 0 3px 0 #ffe2a3, 0 8px 18px rgba(0,0,0,0.5);
                 font-family: 'Inter', sans-serif;
             }
             @keyframes spin {
@@ -5357,6 +5473,10 @@ if st.session_state.get("show_login_animation"):
         </script>
     """, height=0)
     st.session_state.show_login_animation = False
+
+st.session_state.show_header_pulse = True
+render_header_logo(st.session_state.get("show_header_pulse", False))
+st.session_state.show_header_pulse = False
 
 logout_cols = st.columns([4, 1, 1, 1, 1])
 with logout_cols[1]:
@@ -9508,27 +9628,30 @@ if forum_tab is not None:
                 _, _, end_date = get_auction_fields(post)
                 time_left_label = format_time_left(end_date, user_settings) or ""
 
-            card_html = textwrap.dedent(f"""
-                <div class="market-card">
-                    <div class="market-image">
-                        <img src="{image_src}" alt="Listing image" />
-                        {f'<div class="market-price-tag">{price_label}</div>' if price_label else ''}
-                    </div>
-                    <div class="market-body">
-                        <div class="market-badges">
-                            <span class="market-pill gold">{escape_html(listing_type)}</span>
-                            <span class="market-pill">{escape_html(status)}</span>
-                            {f'<span class="market-pill warning">{escape_html(time_left_label)}</span>' if time_left_label else ''}
-                            {f'<span class="market-pill success">NEW</span>' if is_new else ''}
-                            {f'<span class="market-pill">Photos {photo_count}</span>' if photo_count else ''}
-                            {f'<span class="market-pill gold">Buy Now</span>' if post.get("buy_now_price") else ''}
-                        </div>
-                        <div class="market-title">{title}</div>
-                        <div class="market-meta">{country} · {category} · @{seller}</div>
-                    </div>
-                </div>
-            """).strip()
-            st.markdown(card_html, unsafe_allow_html=True)
+            badges = [
+                f'<span class="market-pill gold">{escape_html(listing_type)}</span>',
+                f'<span class="market-pill">{escape_html(status)}</span>'
+            ]
+            if time_left_label:
+                badges.append(f'<span class="market-pill warning">{escape_html(time_left_label)}</span>')
+            if is_new:
+                badges.append('<span class="market-pill success">NEW</span>')
+            if photo_count:
+                badges.append(f'<span class="market-pill">Photos {photo_count}</span>')
+            if post.get("buy_now_price"):
+                badges.append('<span class="market-pill gold">Buy Now</span>')
+            badges_html = "".join(badges)
+
+            price_tag_html = f'<div class="market-price-tag">{price_label}</div>' if price_label else ''
+            card_html = (
+                '<div class="market-card">'
+                f'<div class="market-image"><img src="{image_src}" alt="Listing image" />{price_tag_html}</div>'
+                f'<div class="market-body"><div class="market-badges">{badges_html}</div>'
+                f'<div class="market-title">{title}</div>'
+                f'<div class="market-meta">{country} · {category} · @{seller}</div>'
+                '</div></div>'
+            )
+            render_html_block(card_html)
             actions = st.columns([1, 1])
             with actions[0]:
                 if st.button("View", key=f"{key_prefix}_view_listing_{post_id}"):
