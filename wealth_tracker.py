@@ -152,6 +152,25 @@ st.markdown("""
             filter: drop-shadow(0 12px 20px rgba(0,0,0,0.25));
         }
 
+        .wp-header-text {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+
+        .wp-header-title {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: var(--text);
+            letter-spacing: 0.4px;
+        }
+
+        .wp-header-subtitle {
+            font-size: 0.95rem;
+            color: var(--muted);
+            letter-spacing: 0.2px;
+        }
+
         .wp-header-logo.pulse {
             animation: wpGoldPulse 1.7s ease-out 1;
         }
@@ -1557,8 +1576,25 @@ def load_asset_base64(relative_path):
     except Exception:
         return ""
 
-def render_header_logo(show_pulse=False):
-    data = load_asset_base64(os.path.join("assets", "wealthpulse_header_1800.png"))
+def render_header_logo(show_pulse=False, settings=None):
+    light_theme = is_light_theme(settings or {})
+    if light_theme:
+        data = load_asset_base64(os.path.join("assets", "wealthpulse_header_1800.png"))
+        if data:
+            pulse_class = " pulse" if show_pulse else ""
+            st.markdown(
+                f"""
+                <div class="wp-header-bar">
+                    <div class="wp-logo-wrap">
+                        <img class="wp-header-logo{pulse_class}" src="data:image/png;base64,{data}" alt="WealthPulse" />
+                        <div class="wp-logo-shimmer"></div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            return
+    data = load_asset_base64(os.path.join("assets", "wealthpulse_logo_transparent_glow.png"))
     if data:
         pulse_class = " pulse" if show_pulse else ""
         st.markdown(
@@ -1567,6 +1603,10 @@ def render_header_logo(show_pulse=False):
                 <div class="wp-logo-wrap">
                     <img class="wp-header-logo{pulse_class}" src="data:image/png;base64,{data}" alt="WealthPulse" />
                     <div class="wp-logo-shimmer"></div>
+                </div>
+                <div class="wp-header-text">
+                    <div class="wp-header-title">WealthPulse</div>
+                    <div class="wp-header-subtitle">Portfolio Intelligence & Community Market</div>
                 </div>
             </div>
             """,
@@ -5475,7 +5515,7 @@ if st.session_state.get("show_login_animation"):
     st.session_state.show_login_animation = False
 
 st.session_state.show_header_pulse = True
-render_header_logo(st.session_state.get("show_header_pulse", False))
+render_header_logo(st.session_state.get("show_header_pulse", False), user_settings)
 st.session_state.show_header_pulse = False
 
 logout_cols = st.columns([4, 1, 1, 1, 1])
