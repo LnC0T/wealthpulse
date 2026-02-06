@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WealthPulse — Portfolio Intelligence</title>
+  <style>
+    :root {
+      --navy: #0f1a33;
+      --gold: #ffd65c;
+      --gold-deep: #c07a0c;
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --muted: #5d6b82;
+    }
+    * { box-sizing: border-box; font-family: "Avenir Next", "Helvetica Neue", Arial, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--navy); }
+    .hero { padding: 4rem 6vw; background: linear-gradient(120deg, #ffffff 0%, #edf1f9 100%); }
+    .hero-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 2rem; align-items: center; }
+    .badge { display: inline-block; background: #fff3c4; color: #7a5a1d; padding: 0.35rem 0.8rem; border-radius: 999px; font-size: 0.85rem; font-weight: 600; }
+    h1 { font-size: 3rem; margin: 0.8rem 0; }
+    p { font-size: 1.1rem; color: var(--muted); }
+    .cta { margin-top: 1.6rem; display: flex; gap: 1rem; }
+    .btn { padding: 0.8rem 1.4rem; border-radius: 12px; border: none; font-weight: 700; cursor: pointer; }
+    .btn.primary { background: var(--navy); color: #fff; }
+    .btn.secondary { background: transparent; color: var(--navy); border: 1px solid rgba(15, 26, 51, 0.2); }
+    .card { background: var(--card); border-radius: 16px; padding: 1.2rem; box-shadow: 0 12px 30px rgba(15, 26, 51, 0.08); }
+    .features, .pricing, .testimonials, .footer { padding: 3rem 6vw; }
+    .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.2rem; }
+    .price-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.2rem; }
+    .price-card { border: 1px solid rgba(15, 26, 51, 0.12); }
+    .price-card.highlight { border: 2px solid var(--gold); box-shadow: 0 18px 40px rgba(255, 214, 92, 0.18); }
+    .price-tag { font-size: 1.4rem; font-weight: 700; color: var(--gold-deep); }
+    .list { margin: 0; padding-left: 1rem; color: var(--muted); }
+    .footer { background: #0f1a33; color: #fff; }
+    .footer p { color: rgba(255,255,255,0.7); }
+    @media (max-width: 900px) {
+      .hero-grid { grid-template-columns: 1fr; }
+      h1 { font-size: 2.3rem; }
+    }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <div class="hero-grid">
+      <div>
+        <span class="badge">Built for business owners</span>
+        <h1>Build generational wealth with clarity.</h1>
+        <p>WealthPulse is a portfolio intelligence app for entrepreneurs who want to track assets, understand entities, and make smarter moves.</p>
+        <div class="cta">
+          <button class="btn primary">Start your wealth dashboard</button>
+          <button class="btn secondary">Watch the 2-minute tour</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Why it’s different</h3>
+        <p>Not just budgeting. WealthPulse connects personal, business, and trust assets so you can see the big picture.</p>
+        <ul class="list">
+          <li>Entity-aware tracking</li>
+          <li>Live bullion + market signals</li>
+          <li>Community marketplace (optional)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="features">
+    <h2>Core Features</h2>
+    <div class="feature-grid">
+      <div class="card"><strong>Entity Mapping</strong><p>Track business, trust, and personal ownership in one view.</p></div>
+      <div class="card"><strong>Asset Intelligence</strong><p>Live market pricing and valuation confidence.</p></div>
+      <div class="card"><strong>Bullion Insights</strong><p>Gold and silver tracking with real-time pricing.</p></div>
+      <div class="card"><strong>Actionable Reports</strong><p>Advisor-ready exports and wealth snapshots.</p></div>
+    </div>
+  </section>
+
+  <section class="pricing">
+    <h2>Simple Pricing</h2>
+    <div class="price-grid">
+      <div class="card price-card">
+        <h3>Starter</h3>
+        <div class="price-tag">$6–9/mo</div>
+        <p>Core tracking for personal and business assets.</p>
+        <ul class="list">
+          <li>Portfolio dashboard</li>
+          <li>Local storage</li>
+          <li>Basic analytics</li>
+        </ul>
+      </div>
+      <div class="card price-card">
+        <h3>Pro</h3>
+        <div class="price-tag">$12–20/mo</div>
+        <p>Advanced planning and entity intelligence.</p>
+        <ul class="list">
+          <li>Wealth plan tools</li>
+          <li>Advanced analytics</li>
+          <li>Business owner toolkit</li>
+        </ul>
+      </div>
+      <div class="card price-card highlight">
+        <h3>Elite</h3>
+        <div class="price-tag">$25–40/mo</div>
+        <p>Marketplace, alerts, and premium insights.</p>
+        <ul class="list">
+          <li>Community market</li>
+          <li>Premium alerts</li>
+          <li>Live data integrations</li>
+        </ul>
+      </div>
+      <div class="card price-card">
+        <h3>Founder</h3>
+        <div class="price-tag">Founding Member</div>
+        <p>Early supporter perks + lifetime priority.</p>
+        <ul class="list">
+          <li>All Elite features</li>
+          <li>Founder badge</li>
+          <li>Early access releases</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="testimonials">
+    <h2>What People Say</h2>
+    <div class="feature-grid">
+      <div class="card">“Finally an app that separates my business assets from personal.”</div>
+      <div class="card">“The bullion view alone is worth it.”</div>
+      <div class="card">“The entity mapping makes my trust planning simple.”</div>
+    </div>
+  </section>
+
+  <section class="footer">
+    <h3>WealthPulse</h3>
+    <p>Built by L P Scott — ScottWebDesign</p>
+    <p>Contact: wealthpulse@outlook.co.nz</p>
+  </section>
+</body>
+</html>

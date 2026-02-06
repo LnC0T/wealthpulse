@@ -18,6 +18,11 @@ You can adjust, but this fits the market and the unique value of WealthPulse.
    - Price: $25-40/mo or $240-400/yr
    - Features: marketplace, advanced alerts, premium data, advisor pack
 
+4. **Founder**
+   - Target: early supporters + power users
+   - Price: one-time or lifetime option (founding member)
+   - Features: all Elite features, founder badge, early access releases
+
 ## Stripe Setup (Simple Launch)
 1. Create a Stripe account and verify business details
 2. Add products in Stripe:

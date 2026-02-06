@@ -1577,7 +1577,26 @@ DEFAULT_SETTINGS = {
     "supabase_use_service_role": False,
     "supabase_auth_required": False,
     "storage_provider": "Local",
-    "community_policy_mode": "unknown"
+    "community_policy_mode": "unknown",
+    "subscription_plan": "Starter",
+    "subscription_status": "active",
+    "subscription_renews": "",
+    "subscription_source": "Local"
+}
+
+SUBSCRIPTION_PLANS = ["Starter", "Pro", "Elite", "Founder"]
+PLAN_ORDER = {name: idx for idx, name in enumerate(SUBSCRIPTION_PLANS)}
+PLAN_DESCRIPTIONS = {
+    "Starter": "Core portfolio tracking and basic dashboards.",
+    "Pro": "Advanced analytics, wealth plan, and business owner tools.",
+    "Elite": "Community market, alerts, and premium insights.",
+    "Founder": "All Elite features plus early access and founder perks."
+}
+PLAN_PRICING = {
+    "Starter": "$6–9/mo",
+    "Pro": "$12–20/mo",
+    "Elite": "$25–40/mo",
+    "Founder": "Founding Member"
 }
 
 # ==============================
@@ -1585,6 +1604,40 @@ DEFAULT_SETTINGS = {
 # ==============================
 def escape_html(value):
     return html.escape(str(value)) if value is not None else ""
+
+def normalize_plan(plan):
+    if not plan:
+        return "Starter"
+    plan = str(plan).strip().title()
+    if plan.startswith("Found"):
+        return "Founder"
+    if plan not in PLAN_ORDER:
+        return "Starter"
+    return plan
+
+def plan_rank(plan):
+    return PLAN_ORDER.get(normalize_plan(plan), 0)
+
+def has_plan_at_least(settings, required_plan):
+    current_plan = normalize_plan((settings or {}).get("subscription_plan"))
+    return plan_rank(current_plan) >= plan_rank(required_plan)
+
+def render_plan_gate(settings, required_plan, feature_name, detail="", key="plan_gate"):
+    current_plan = normalize_plan((settings or {}).get("subscription_plan"))
+    st.markdown(
+        f"### {feature_name} (Locked)"
+    )
+    st.info(
+        f"This feature is available on **{required_plan}+** plans. "
+        f"You're currently on **{current_plan}**."
+    )
+    if detail:
+        st.caption(detail)
+    cols = st.columns([1, 2, 1])
+    with cols[1]:
+        if st.button("View Plans", key=key, width="stretch"):
+            st.session_state.jump_to_settings = True
+            st.rerun()
 
 def get_resource_path(relative_path):
     base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -5941,52 +5994,106 @@ with tab1:
     st.session_state.portfolio_entity_view = selected_view
 
     if not portfolio and not user_settings.get("onboarding_completed", False):
+        if "onboarding_step" not in st.session_state:
+            st.session_state.onboarding_step = 1
+        step = int(st.session_state.onboarding_step)
+        total_steps = 4
         country_code = get_country_code(user_settings)
         country_name = get_country_name(country_code)
         examples = ", ".join(get_local_entity_examples(country_code))
         local_hint = get_local_entity_hint(country_code)
-        st.markdown("### Getting Started")
-        st.info(f"Built for founders in {country_name}: separate personal, business, and trust assets so you can see true net worth.")
-        st.markdown(f"**Suggested entities for {country_name}:** {examples}")
-        st.caption(local_hint)
-        st.markdown("**Suggested path:** Create entities → Add assets → Add liabilities → Set a Wealth Plan.")
-        ob_col1, ob_col2, ob_col3, ob_col4, ob_col5 = st.columns(5)
-        with ob_col1:
-            if st.button("Add First Asset", width="stretch"):
-                st.session_state.jump_to_add_asset = True
-                st.rerun()
-        with ob_col2:
-            if st.button("Set Up Entities", width="stretch"):
-                st.session_state.jump_to_entities = True
-                st.rerun()
-        with ob_col3:
-            if st.button("Open Settings", width="stretch"):
-                st.session_state.jump_to_settings = True
-                st.rerun()
-        with ob_col4:
-            if st.button("Load Demo Portfolio", width="stretch"):
-                record = ensure_user_record(db, user)
-                record["portfolio"] = build_demo_portfolio()
-                record["entities"] = [
-                    build_entity("Personal", "Person", [user] if user else []),
-                    build_entity("Trust", "Trust", []),
-                    build_entity("Joint", "Joint", [])
-                ]
-                settings = record.get("settings", {})
-                settings["onboarding_completed"] = True
-                record["settings"] = settings
-                save_data(db)
-                st.session_state.jump_to_portfolio = True
-                st.rerun()
-        with ob_col5:
-            if st.button("Dismiss", width="stretch"):
-                record = ensure_user_record(db, user)
-                settings = record.get("settings", {})
-                settings["onboarding_completed"] = True
-                record["settings"] = settings
-                save_data(db)
-                st.success("Onboarding dismissed.")
 
+        st.markdown(f"### Guided Setup (Step {step} of {total_steps})")
+        st.progress(step / total_steps)
+        st.caption("Designed for founders and small business owners — keep personal, business, and trust assets cleanly separated.")
+
+        if step == 1:
+            st.markdown("**Choose your plan**")
+            current_plan = normalize_plan(user_settings.get("subscription_plan"))
+            plan_choice = st.radio(
+                "Plan",
+                SUBSCRIPTION_PLANS,
+                index=SUBSCRIPTION_PLANS.index(current_plan) if current_plan in SUBSCRIPTION_PLANS else 0,
+                horizontal=True
+            )
+            st.caption(PLAN_DESCRIPTIONS.get(plan_choice, ""))
+            st.write("Suggested for business owners: **Pro**. For community access: **Elite**.")
+            col_a, col_b = st.columns([1, 1])
+            with col_a:
+                if st.button("Continue", width="stretch"):
+                    record = ensure_user_record(db, user)
+                    settings = record.get("settings", {})
+                    settings["subscription_plan"] = normalize_plan(plan_choice)
+                    settings.setdefault("subscription_status", "active")
+                    record["settings"] = settings
+                    save_data(db)
+                    st.session_state.onboarding_step = 2
+                    st.rerun()
+            with col_b:
+                if st.button("Skip onboarding", width="stretch"):
+                    record = ensure_user_record(db, user)
+                    settings = record.get("settings", {})
+                    settings["onboarding_completed"] = True
+                    record["settings"] = settings
+                    save_data(db)
+                    st.success("Onboarding dismissed.")
+
+        elif step == 2:
+            st.info(f"Suggested entities for {country_name}: {examples}")
+            st.caption(local_hint)
+            col_a, col_b = st.columns([1, 1])
+            with col_a:
+                if st.button("Set Up Entities", width="stretch"):
+                    st.session_state.jump_to_entities = True
+                    st.rerun()
+            with col_b:
+                if st.button("Continue", width="stretch"):
+                    st.session_state.onboarding_step = 3
+                    st.rerun()
+
+        elif step == 3:
+            st.markdown("**Add your first assets**")
+            col_a, col_b, col_c = st.columns([1, 1, 1])
+            with col_a:
+                if st.button("Add First Asset", width="stretch"):
+                    st.session_state.jump_to_add_asset = True
+                    st.rerun()
+            with col_b:
+                if st.button("Load Demo Portfolio", width="stretch"):
+                    record = ensure_user_record(db, user)
+                    record["portfolio"] = build_demo_portfolio()
+                    record["entities"] = [
+                        build_entity("Personal", "Person", [user] if user else []),
+                        build_entity("Trust", "Trust", []),
+                        build_entity("Joint", "Joint", [])
+                    ]
+                    settings = record.get("settings", {})
+                    settings["onboarding_completed"] = True
+                    record["settings"] = settings
+                    save_data(db)
+                    st.session_state.jump_to_portfolio = True
+                    st.rerun()
+            with col_c:
+                if st.button("Continue", width="stretch"):
+                    st.session_state.onboarding_step = 4
+                    st.rerun()
+
+        else:
+            st.markdown("**Set your wealth goals**")
+            st.caption("Optional but highly recommended — set a target net worth and timeframe.")
+            col_a, col_b = st.columns([1, 1])
+            with col_a:
+                if st.button("Open Wealth Plan", width="stretch"):
+                    st.session_state.jump_to_settings = True
+                    st.rerun()
+            with col_b:
+                if st.button("Finish Setup", width="stretch"):
+                    record = ensure_user_record(db, user)
+                    settings = record.get("settings", {})
+                    settings["onboarding_completed"] = True
+                    record["settings"] = settings
+                    save_data(db)
+                    st.success("You're all set. Welcome to WealthPulse!")
     if "Market Snippets" in panels:
         st.subheader("Market Snippets")
         snippet_cols = st.columns(2)
@@ -6367,556 +6474,565 @@ with tab1:
 # TAB 2: ANALYTICS & CHARTS
 # ==============================
 with tab2:
-    entity_view = st.session_state.get("portfolio_entity_view", "All")
-    view_items = build_portfolio_view_items(portfolio, entity_view)
-    if entity_view != "All":
-        st.caption(f"Viewing: {entity_view}")
-    if not view_items:
-        st.info("Add assets to see analytics")
+    if not has_plan_at_least(user_settings, "Pro"):
+        render_plan_gate(user_settings, "Pro", "Analytics & Charts", "Upgrade to unlock portfolio analytics, trends, and advanced charts.", key="gate_analytics")
     else:
-        # Calculate all values first
-        asset_values = []
-        asset_types = {}
-        asset_names = []
-        asset_worth = []
-        
-        for item in view_items:
-            asset = item["asset"]
-            share = item["share"]
-            if asset.get("ticker"):
-                asset["market_price"] = get_price(asset["ticker"])
-            value, _, _ = ai_valuation(asset)
-            value_display = format_currency_value(value * share, currency_rate)
-            asset_values.append(value_display)
-            asset_types[asset["type"]] = asset_types.get(asset["type"], 0) + value_display
-            asset_names.append(asset["name"])
-            asset_worth.append(value_display)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Asset Allocation")
-            if PLOTLY_AVAILABLE:
-                fig_pie = go.Figure(data=[go.Pie(
-                    labels=list(asset_types.keys()),
-                    values=list(asset_types.values()),
-                    hole=0.4,
-                    marker=dict(colors=px.colors.sequential.Plasma),
-                    textinfo='label+percent',
-                    textfont=dict(size=12, color=plotly_text_color),
-                    hovertemplate=f'%{{label}}: {currency_code} %{{value:,.2f}}<extra></extra>'
-                )])
-                fig_pie.update_layout(
-                    showlegend=False,
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    margin=dict(t=0, b=0, l=0, r=0),
-                    height=400,
-                    font=dict(color=plotly_text_color)
-                )
-                st.plotly_chart(fig_pie, width="stretch")
-            else:
-                # Fallback to streamlit native chart
-                allocation_df = pd.DataFrame({
-                    'Type': list(asset_types.keys()),
-                    'Value': list(asset_types.values())
-                })
-                st.dataframe(allocation_df, hide_index=True)
-                st.bar_chart(allocation_df.set_index('Type'))
-        
-        with col2:
-            st.subheader("Asset Values")
-            if PLOTLY_AVAILABLE:
-                fig_bar = go.Figure(data=[go.Bar(
-                    x=asset_worth,
-                    y=asset_names,
-                    orientation='h',
-                    marker=dict(
-                        color=asset_worth,
-                        colorscale='Plasma',
-                        showscale=False
-                    ),
-                    text=[format_currency(v, currency_symbol, 1.0) for v in asset_worth],
-                    textposition='outside',
-                    textfont=dict(color=plotly_text_color)
-                )])
-                fig_bar.update_layout(
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    yaxis=dict(showgrid=False, color=plotly_text_color),
-                    xaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color),
-                    margin=dict(t=0, b=0, l=0, r=0),
-                    height=400,
-                    font=dict(color=plotly_text_color)
-                )
-                st.plotly_chart(fig_bar, width="stretch")
-            else:
-                # Fallback to streamlit
-                values_df = pd.DataFrame({
-                    'Asset': asset_names,
-                    'Value': asset_worth
-                }).set_index('Asset')
-                st.bar_chart(values_df)
-        
-        # Metals trend
-        st.subheader("Metals Trend")
-        if user_settings.get("metals_provider") == "MetalpriceAPI" and get_effective_setting(user_settings, "metalprice_api_key", "METALPRICE_API_KEY"):
-            end_date = get_now_for_settings(user_settings).date()
-            start_date = end_date - timedelta(days=int(user_settings.get("metal_history_days", 30)))
-            metals_df, metals_err = fetch_metalprice_timeframe(
-                get_effective_setting(user_settings, "metalprice_api_key", "METALPRICE_API_KEY"),
-                start_date.isoformat(),
-                end_date.isoformat()
-            )
-            if metals_df is not None and not metals_df.empty:
-                metals_df["date"] = pd.to_datetime(metals_df["date"])
-                for code in ["XAU", "XAG", "XPT", "XPD"]:
-                    if code in metals_df.columns:
-                        metals_df[code] = metals_df[code] * currency_rate
-                if PLOTLY_AVAILABLE:
-                    fig_metals = go.Figure()
-                    for code in ["XAU", "XAG", "XPT", "XPD"]:
-                        if code in metals_df.columns:
-                            fig_metals.add_trace(go.Scatter(
-                                x=metals_df["date"],
-                                y=metals_df[code],
-                                mode="lines",
-                                name=METAL_NAMES.get(code, code)
-                            ))
-                    fig_metals.update_layout(
-                        paper_bgcolor='rgba(0,0,0,0)',
-                        plot_bgcolor='rgba(0,0,0,0)',
-                        xaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color),
-                        yaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color,
-                                   title=f"Price ({currency_code})"),
-                        height=350,
-                        font=dict(color=plotly_text_color)
-                    )
-                    st.plotly_chart(fig_metals, width="stretch")
-                else:
-                    chart_df = metals_df.set_index("date")
-                    st.line_chart(chart_df[["XAU", "XAG"]] if "XAU" in chart_df.columns else chart_df)
-            else:
-                st.info(f"Unable to load metals trend: {metals_err or 'No data'}")
+        entity_view = st.session_state.get("portfolio_entity_view", "All")
+        view_items = build_portfolio_view_items(portfolio, entity_view)
+        if entity_view != "All":
+            st.caption(f"Viewing: {entity_view}")
+        if not view_items:
+            st.info("Add assets to see analytics")
         else:
-            st.info("Metals trend is available with MetalpriceAPI history (paid).")
-
-        # Cost basis vs current value
-        st.subheader("Cost Basis vs Current Value")
-        cost_rows = []
-        for item in view_items:
-            asset = item["asset"]
-            share = item["share"]
-            cost_basis = asset.get("details", {}).get("cost_basis")
-            if cost_basis:
-                current_value, _, _ = ai_valuation(asset)
-                cost_rows.append({
-                    "Asset": asset["name"],
-                    "Cost Basis": format_currency_value(float(cost_basis) * share, currency_rate),
-                    "Current Value": format_currency_value(current_value * share, currency_rate)
-                })
-        if cost_rows:
-            cost_df = pd.DataFrame(cost_rows)
-            if PLOTLY_AVAILABLE:
-                fig_cost = go.Figure()
-                fig_cost.add_trace(go.Bar(
-                    x=cost_df["Asset"],
-                    y=cost_df["Cost Basis"],
-                    name="Cost Basis"
-                ))
-                fig_cost.add_trace(go.Bar(
-                    x=cost_df["Asset"],
-                    y=cost_df["Current Value"],
-                    name="Current Value"
-                ))
-                fig_cost.update_layout(
-                    barmode="group",
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    xaxis=dict(color=plotly_text_color),
-                    yaxis=dict(color=plotly_text_color, title=f"Value ({currency_code})", showgrid=True, gridcolor=plotly_grid_color),
-                    height=350,
-                    font=dict(color=plotly_text_color)
-                )
-                st.plotly_chart(fig_cost, width="stretch")
-            else:
-                st.bar_chart(cost_df.set_index("Asset"))
-        else:
-            st.info("Add a cost basis in asset details to see this chart.")
-
-        # Historical performance simulation
-        st.subheader("Portfolio Performance Trend")
-        if any(item["asset"].get("ticker") for item in view_items):
-            combined_history = pd.DataFrame()
+            # Calculate all values first
+            asset_values = []
+            asset_types = {}
+            asset_names = []
+            asset_worth = []
+    
             for item in view_items:
                 asset = item["asset"]
                 share = item["share"]
                 if asset.get("ticker"):
-                    hist = get_detailed_history(asset["ticker"], "1y")
-                    if not hist.empty:
-                        hist["Portfolio_Value"] = hist["Close"] * asset["qty"] * currency_rate * share
-                        if combined_history.empty:
-                            combined_history = hist[["Portfolio_Value"]].copy()
-                            combined_history.columns = [asset["name"]]
-                        else:
-                            combined_history = combined_history.join(hist[["Portfolio_Value"]].rename(columns={"Portfolio_Value": asset["name"]}), how="outer")
-            
-            if not combined_history.empty:
-                combined_history = combined_history.ffill().bfill()
+                    asset["market_price"] = get_price(asset["ticker"])
+                value, _, _ = ai_valuation(asset)
+                value_display = format_currency_value(value * share, currency_rate)
+                asset_values.append(value_display)
+                asset_types[asset["type"]] = asset_types.get(asset["type"], 0) + value_display
+                asset_names.append(asset["name"])
+                asset_worth.append(value_display)
+    
+            col1, col2 = st.columns(2)
+    
+            with col1:
+                st.subheader("Asset Allocation")
                 if PLOTLY_AVAILABLE:
-                    fig_line = go.Figure()
-                    colors = px.colors.sequential.Plasma[:len(combined_history.columns)]
-                    for i, col in enumerate(combined_history.columns):
-                        fig_line.add_trace(go.Scatter(
-                            x=combined_history.index,
-                            y=combined_history[col],
-                            mode='lines',
-                            name=col,
-                            line=dict(width=2, color=colors[i]),
-                            stackgroup='one' if len(combined_history.columns) > 1 else None
-                        ))
-                    fig_line.update_layout(
+                    fig_pie = go.Figure(data=[go.Pie(
+                        labels=list(asset_types.keys()),
+                        values=list(asset_types.values()),
+                        hole=0.4,
+                        marker=dict(colors=px.colors.sequential.Plasma),
+                        textinfo='label+percent',
+                        textfont=dict(size=12, color=plotly_text_color),
+                        hovertemplate=f'%{{label}}: {currency_code} %{{value:,.2f}}<extra></extra>'
+                    )])
+                    fig_pie.update_layout(
+                        showlegend=False,
                         paper_bgcolor='rgba(0,0,0,0)',
                         plot_bgcolor='rgba(0,0,0,0)',
-                        legend=dict(bgcolor=plotly_legend_bg, font=dict(color=plotly_text_color)),
-                        xaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color),
-                        yaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color, title=f"Value ({currency_code})"),
+                        margin=dict(t=0, b=0, l=0, r=0),
                         height=400,
-                        hovermode='x unified',
                         font=dict(color=plotly_text_color)
                     )
-                    st.plotly_chart(fig_line, width="stretch")
+                    st.plotly_chart(fig_pie, width="stretch")
                 else:
-                    st.line_chart(combined_history)
-        else:
-            st.info("Add assets with tickers to see performance trends")
+                    # Fallback to streamlit native chart
+                    allocation_df = pd.DataFrame({
+                        'Type': list(asset_types.keys()),
+                        'Value': list(asset_types.values())
+                    })
+                    st.dataframe(allocation_df, hide_index=True)
+                    st.bar_chart(allocation_df.set_index('Type'))
+    
+            with col2:
+                st.subheader("Asset Values")
+                if PLOTLY_AVAILABLE:
+                    fig_bar = go.Figure(data=[go.Bar(
+                        x=asset_worth,
+                        y=asset_names,
+                        orientation='h',
+                        marker=dict(
+                            color=asset_worth,
+                            colorscale='Plasma',
+                            showscale=False
+                        ),
+                        text=[format_currency(v, currency_symbol, 1.0) for v in asset_worth],
+                        textposition='outside',
+                        textfont=dict(color=plotly_text_color)
+                    )])
+                    fig_bar.update_layout(
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        yaxis=dict(showgrid=False, color=plotly_text_color),
+                        xaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color),
+                        margin=dict(t=0, b=0, l=0, r=0),
+                        height=400,
+                        font=dict(color=plotly_text_color)
+                    )
+                    st.plotly_chart(fig_bar, width="stretch")
+                else:
+                    # Fallback to streamlit
+                    values_df = pd.DataFrame({
+                        'Asset': asset_names,
+                        'Value': asset_worth
+                    }).set_index('Asset')
+                    st.bar_chart(values_df)
+    
+            # Metals trend
+            st.subheader("Metals Trend")
+            if user_settings.get("metals_provider") == "MetalpriceAPI" and get_effective_setting(user_settings, "metalprice_api_key", "METALPRICE_API_KEY"):
+                end_date = get_now_for_settings(user_settings).date()
+                start_date = end_date - timedelta(days=int(user_settings.get("metal_history_days", 30)))
+                metals_df, metals_err = fetch_metalprice_timeframe(
+                    get_effective_setting(user_settings, "metalprice_api_key", "METALPRICE_API_KEY"),
+                    start_date.isoformat(),
+                    end_date.isoformat()
+                )
+                if metals_df is not None and not metals_df.empty:
+                    metals_df["date"] = pd.to_datetime(metals_df["date"])
+                    for code in ["XAU", "XAG", "XPT", "XPD"]:
+                        if code in metals_df.columns:
+                            metals_df[code] = metals_df[code] * currency_rate
+                    if PLOTLY_AVAILABLE:
+                        fig_metals = go.Figure()
+                        for code in ["XAU", "XAG", "XPT", "XPD"]:
+                            if code in metals_df.columns:
+                                fig_metals.add_trace(go.Scatter(
+                                    x=metals_df["date"],
+                                    y=metals_df[code],
+                                    mode="lines",
+                                    name=METAL_NAMES.get(code, code)
+                                ))
+                        fig_metals.update_layout(
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            xaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color),
+                            yaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color,
+                                       title=f"Price ({currency_code})"),
+                            height=350,
+                            font=dict(color=plotly_text_color)
+                        )
+                        st.plotly_chart(fig_metals, width="stretch")
+                    else:
+                        chart_df = metals_df.set_index("date")
+                        st.line_chart(chart_df[["XAU", "XAG"]] if "XAU" in chart_df.columns else chart_df)
+                else:
+                    st.info(f"Unable to load metals trend: {metals_err or 'No data'}")
+            else:
+                st.info("Metals trend is available with MetalpriceAPI history (paid).")
+
+            # Cost basis vs current value
+            st.subheader("Cost Basis vs Current Value")
+            cost_rows = []
+            for item in view_items:
+                asset = item["asset"]
+                share = item["share"]
+                cost_basis = asset.get("details", {}).get("cost_basis")
+                if cost_basis:
+                    current_value, _, _ = ai_valuation(asset)
+                    cost_rows.append({
+                        "Asset": asset["name"],
+                        "Cost Basis": format_currency_value(float(cost_basis) * share, currency_rate),
+                        "Current Value": format_currency_value(current_value * share, currency_rate)
+                    })
+            if cost_rows:
+                cost_df = pd.DataFrame(cost_rows)
+                if PLOTLY_AVAILABLE:
+                    fig_cost = go.Figure()
+                    fig_cost.add_trace(go.Bar(
+                        x=cost_df["Asset"],
+                        y=cost_df["Cost Basis"],
+                        name="Cost Basis"
+                    ))
+                    fig_cost.add_trace(go.Bar(
+                        x=cost_df["Asset"],
+                        y=cost_df["Current Value"],
+                        name="Current Value"
+                    ))
+                    fig_cost.update_layout(
+                        barmode="group",
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis=dict(color=plotly_text_color),
+                        yaxis=dict(color=plotly_text_color, title=f"Value ({currency_code})", showgrid=True, gridcolor=plotly_grid_color),
+                        height=350,
+                        font=dict(color=plotly_text_color)
+                    )
+                    st.plotly_chart(fig_cost, width="stretch")
+                else:
+                    st.bar_chart(cost_df.set_index("Asset"))
+            else:
+                st.info("Add a cost basis in asset details to see this chart.")
+
+            # Historical performance simulation
+            st.subheader("Portfolio Performance Trend")
+            if any(item["asset"].get("ticker") for item in view_items):
+                combined_history = pd.DataFrame()
+                for item in view_items:
+                    asset = item["asset"]
+                    share = item["share"]
+                    if asset.get("ticker"):
+                        hist = get_detailed_history(asset["ticker"], "1y")
+                        if not hist.empty:
+                            hist["Portfolio_Value"] = hist["Close"] * asset["qty"] * currency_rate * share
+                            if combined_history.empty:
+                                combined_history = hist[["Portfolio_Value"]].copy()
+                                combined_history.columns = [asset["name"]]
+                            else:
+                                combined_history = combined_history.join(hist[["Portfolio_Value"]].rename(columns={"Portfolio_Value": asset["name"]}), how="outer")
+        
+                if not combined_history.empty:
+                    combined_history = combined_history.ffill().bfill()
+                    if PLOTLY_AVAILABLE:
+                        fig_line = go.Figure()
+                        colors = px.colors.sequential.Plasma[:len(combined_history.columns)]
+                        for i, col in enumerate(combined_history.columns):
+                            fig_line.add_trace(go.Scatter(
+                                x=combined_history.index,
+                                y=combined_history[col],
+                                mode='lines',
+                                name=col,
+                                line=dict(width=2, color=colors[i]),
+                                stackgroup='one' if len(combined_history.columns) > 1 else None
+                            ))
+                        fig_line.update_layout(
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            legend=dict(bgcolor=plotly_legend_bg, font=dict(color=plotly_text_color)),
+                            xaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color),
+                            yaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color, title=f"Value ({currency_code})"),
+                            height=400,
+                            hovermode='x unified',
+                            font=dict(color=plotly_text_color)
+                        )
+                        st.plotly_chart(fig_line, width="stretch")
+                    else:
+                        st.line_chart(combined_history)
+            else:
+                st.info("Add assets with tickers to see performance trends")
 
 # ==============================
 # TAB 3: BUY/SELL GUIDE
 # ==============================
 with tab3:
-    st.subheader("Intelligent Buy/Sell Recommendations")
-    entity_view = st.session_state.get("portfolio_entity_view", "All")
-    view_items = build_portfolio_view_items(portfolio, entity_view)
-    if entity_view != "All":
-        st.caption(f"Viewing: {entity_view}")
-    
-    for idx, item in enumerate(view_items):
-        asset = item["asset"]
-        if asset.get("ticker"):
-            current_price = get_price(asset["ticker"])
-            hist = get_detailed_history(asset["ticker"], "1y")
-            
-            if not hist.empty:
-                high_52w = hist["High"].max()
-                low_52w = hist["Low"].min()
-                avg_price = hist["Close"].mean()
-                
-                # Recommendation logic
-                if current_price < avg_price * 0.95:
-                    signal = "BUY"
-                    signal_color = "#2ecc71"
-                    reason = "Trading below 90-day average - potential undervaluation"
-                elif current_price > high_52w * 0.98:
-                    signal = "SELL"
-                    signal_color = "#e74c3c"
-                    reason = "Near 52-week high - profit taking opportunity"
-                else:
-                    signal = "HOLD"
-                    signal_color = "#f39c12"
-                    reason = "Stable performance - maintain position"
-                safe_name = escape_html(asset.get("name", ""))
-                current_price_html = format_currency_html(current_price, currency_symbol, currency_rate)
-                high_html = format_currency_html(high_52w, currency_symbol, currency_rate)
-                low_html = format_currency_html(low_52w, currency_symbol, currency_rate)
+    if not has_plan_at_least(user_settings, "Pro"):
+        render_plan_gate(user_settings, "Pro", "Buy/Sell Guidance", "Upgrade to unlock buy/sell intelligence and recommendations.", key="gate_buysell")
+    else:
+        st.subheader("Intelligent Buy/Sell Recommendations")
+        entity_view = st.session_state.get("portfolio_entity_view", "All")
+        view_items = build_portfolio_view_items(portfolio, entity_view)
+        if entity_view != "All":
+            st.caption(f"Viewing: {entity_view}")
 
+        for idx, item in enumerate(view_items):
+            asset = item["asset"]
+            if asset.get("ticker"):
+                current_price = get_price(asset["ticker"])
+                hist = get_detailed_history(asset["ticker"], "1y")
+        
+                if not hist.empty:
+                    high_52w = hist["High"].max()
+                    low_52w = hist["Low"].min()
+                    avg_price = hist["Close"].mean()
+            
+                    # Recommendation logic
+                    if current_price < avg_price * 0.95:
+                        signal = "BUY"
+                        signal_color = "#2ecc71"
+                        reason = "Trading below 90-day average - potential undervaluation"
+                    elif current_price > high_52w * 0.98:
+                        signal = "SELL"
+                        signal_color = "#e74c3c"
+                        reason = "Near 52-week high - profit taking opportunity"
+                    else:
+                        signal = "HOLD"
+                        signal_color = "#f39c12"
+                        reason = "Stable performance - maintain position"
+                    safe_name = escape_html(asset.get("name", ""))
+                    current_price_html = format_currency_html(current_price, currency_symbol, currency_rate)
+                    high_html = format_currency_html(high_52w, currency_symbol, currency_rate)
+                    low_html = format_currency_html(low_52w, currency_symbol, currency_rate)
+
+                    with st.container():
+                        st.markdown(f"""
+                            <div style="background: rgba(30, 30, 40, 0.9); border-radius: 15px; padding: 1.5rem; margin: 1rem 0; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                                    <h3 style="margin: 0; color: var(--text);">{safe_name}</h3>
+                                    <span style="background: {signal_color}; color: white; padding: 0.5rem 1rem; border-radius: 20px; font-weight: 700;">
+                                        {signal}
+                                    </span>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin: 1rem 0;">
+                                    <div style="text-align: center; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 10px;">
+                                        <div style="font-size: 1.3rem; font-weight: 700; color: #d1a843;">{current_price_html}</div>
+                                        <div style="font-size: 0.85rem; color: var(--muted);">Current</div>
+                                    </div>
+                                    <div style="text-align: center; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 10px;">
+                                        <div style="font-size: 1.3rem; font-weight: 700; color: #2ecc71;">{high_html}</div>
+                                        <div style="font-size: 0.85rem; color: var(--muted);">52W High</div>
+                                    </div>
+                                    <div style="text-align: center; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 10px;">
+                                        <div style="font-size: 1.3rem; font-weight: 700; color: #e74c3c;">{low_html}</div>
+                                        <div style="font-size: 0.85rem; color: var(--muted);">52W Low</div>
+                                    </div>
+                                </div>
+                                <p style="margin: 0; color: var(--muted); font-size: 0.95rem;">{reason}</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+                
+                        with st.expander("Price History"):
+                            hist_display = hist.copy()
+                            hist_display["Close"] = hist_display["Close"] * currency_rate
+                            if PLOTLY_AVAILABLE:
+                                fig_mini = go.Figure(data=[go.Scatter(
+                                    x=hist_display.index,
+                                    y=hist_display["Close"],
+                                    fill='tozeroy',
+                                    fillcolor='rgba(102, 126, 234, 0.3)',
+                                    line=dict(color='#d1a843', width=2)
+                                )])
+                                fig_mini.update_layout(
+                                    height=250,
+                                    paper_bgcolor='rgba(0,0,0,0)',
+                                    plot_bgcolor='rgba(0,0,0,0)',
+                                    xaxis=dict(showgrid=False, color=plotly_text_color),
+                                    yaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color),
+                                    margin=dict(t=0, b=0, l=0, r=0),
+                                    font=dict(color=plotly_text_color)
+                                )
+                                st.plotly_chart(fig_mini, width="stretch")
+                            else:
+                                st.line_chart(hist_display["Close"])
+            else:
+                # Physical assets guidance
+                value, confidence, _ = ai_valuation(asset)
+                image = get_asset_image(asset)
+                safe_name = escape_html(asset.get("name", ""))
+                value_html = format_currency_html(value, currency_symbol, currency_rate)
                 with st.container():
-                    st.markdown(f"""
-                        <div style="background: rgba(30, 30, 40, 0.9); border-radius: 15px; padding: 1.5rem; margin: 1rem 0; box-shadow: 0 4px 20px rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                                <h3 style="margin: 0; color: var(--text);">{safe_name}</h3>
-                                <span style="background: {signal_color}; color: white; padding: 0.5rem 1rem; border-radius: 20px; font-weight: 700;">
-                                    {signal}
-                                </span>
-                            </div>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin: 1rem 0;">
-                                <div style="text-align: center; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 10px;">
-                                    <div style="font-size: 1.3rem; font-weight: 700; color: #d1a843;">{current_price_html}</div>
-                                    <div style="font-size: 0.85rem; color: var(--muted);">Current</div>
-                                </div>
-                                <div style="text-align: center; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 10px;">
-                                    <div style="font-size: 1.3rem; font-weight: 700; color: #2ecc71;">{high_html}</div>
-                                    <div style="font-size: 0.85rem; color: var(--muted);">52W High</div>
-                                </div>
-                                <div style="text-align: center; padding: 1rem; background: rgba(0,0,0,0.3); border-radius: 10px;">
-                                    <div style="font-size: 1.3rem; font-weight: 700; color: #e74c3c;">{low_html}</div>
-                                    <div style="font-size: 0.85rem; color: var(--muted);">52W Low</div>
+                    col1, col2 = st.columns([1, 3])
+                    with col1:
+                        st.image(image["bytes"], width=100)
+                    with col2:
+                        st.markdown(f"""
+                            <div style="background: rgba(30, 30, 40, 0.9); border-radius: 15px; padding: 1.5rem; margin: 1rem 0; border: 1px solid rgba(255,255,255,0.1);">
+                                <h3 style="color: var(--text); margin-bottom: 0.5rem;">{safe_name}</h3>
+                                <p style="color: var(--muted); margin-bottom: 1rem;">Physical Asset - Market research recommended</p>
+                                <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 10px; border-left: 4px solid #d1a843;">
+                                    <strong style="color: var(--text);">Valuation Confidence:</strong> <span style="color: #d1a843;">{confidence}%</span><br>
+                                    <strong style="color: var(--text);">Estimated Value:</strong> <span style="color: #2ecc71;">{value_html}</span><br>
+                                    <strong style="color: var(--text);">Recommendation:</strong> <span style="color: #f39c12;">Check recent eBay sold listings for comparable items</span>
                                 </div>
                             </div>
-                            <p style="margin: 0; color: var(--muted); font-size: 0.95rem;">{reason}</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    with st.expander("Price History"):
-                        hist_display = hist.copy()
-                        hist_display["Close"] = hist_display["Close"] * currency_rate
-                        if PLOTLY_AVAILABLE:
-                            fig_mini = go.Figure(data=[go.Scatter(
-                                x=hist_display.index,
-                                y=hist_display["Close"],
-                                fill='tozeroy',
-                                fillcolor='rgba(102, 126, 234, 0.3)',
-                                line=dict(color='#d1a843', width=2)
-                            )])
-                            fig_mini.update_layout(
-                                height=250,
-                                paper_bgcolor='rgba(0,0,0,0)',
-                                plot_bgcolor='rgba(0,0,0,0)',
-                                xaxis=dict(showgrid=False, color=plotly_text_color),
-                                yaxis=dict(showgrid=True, gridcolor=plotly_grid_color, color=plotly_text_color),
-                                margin=dict(t=0, b=0, l=0, r=0),
-                                font=dict(color=plotly_text_color)
-                            )
-                            st.plotly_chart(fig_mini, width="stretch")
-                        else:
-                            st.line_chart(hist_display["Close"])
-        else:
-            # Physical assets guidance
-            value, confidence, _ = ai_valuation(asset)
-            image = get_asset_image(asset)
-            safe_name = escape_html(asset.get("name", ""))
-            value_html = format_currency_html(value, currency_symbol, currency_rate)
-            with st.container():
-                col1, col2 = st.columns([1, 3])
-                with col1:
-                    st.image(image["bytes"], width=100)
-                with col2:
-                    st.markdown(f"""
-                        <div style="background: rgba(30, 30, 40, 0.9); border-radius: 15px; padding: 1.5rem; margin: 1rem 0; border: 1px solid rgba(255,255,255,0.1);">
-                            <h3 style="color: var(--text); margin-bottom: 0.5rem;">{safe_name}</h3>
-                            <p style="color: var(--muted); margin-bottom: 1rem;">Physical Asset - Market research recommended</p>
-                            <div style="background: rgba(0,0,0,0.3); padding: 1rem; border-radius: 10px; border-left: 4px solid #d1a843;">
-                                <strong style="color: var(--text);">Valuation Confidence:</strong> <span style="color: #d1a843;">{confidence}%</span><br>
-                                <strong style="color: var(--text);">Estimated Value:</strong> <span style="color: #2ecc71;">{value_html}</span><br>
-                                <strong style="color: var(--text);">Recommendation:</strong> <span style="color: #f39c12;">Check recent eBay sold listings for comparable items</span>
-                            </div>
-                        </div>
-                    """, unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
 
 # ==============================
 # TAB 4: PORTFOLIO STATS
 # ==============================
 with tab4:
-    col1, col2, col3, col4 = st.columns(4)
-    entity_view = st.session_state.get("portfolio_entity_view", "All")
-    view_items = build_portfolio_view_items(portfolio, entity_view)
-    if entity_view != "All":
-        st.caption(f"Viewing: {entity_view}")
-    total_value = sum(ai_valuation(item["asset"])[0] * item["share"] for item in view_items)
-    total_assets = len(view_items)
-    physical_assets = len([item for item in view_items if not item["asset"].get("ticker")])
-    financial_assets = total_assets - physical_assets
-    
-    with col1:
-        st.metric("Total Assets", total_assets)
-    with col2:
-        st.metric("Physical Items", physical_assets)
-    with col3:
-        st.metric("Financial Assets", financial_assets)
-    with col4:
-        avg_value = total_value / total_assets if total_assets > 0 else 0
-        st.metric("Avg Asset Value", format_currency(avg_value, currency_symbol, currency_rate))
-
-    # Asset type breakdown (used in wealth plan + stats)
-    type_stats = {}
-    for item in view_items:
-        asset = item["asset"]
-        t = asset["type"]
-        val, _, _ = ai_valuation(asset)
-        val *= item["share"]
-        if t not in type_stats:
-            type_stats[t] = {"count": 0, "value": 0}
-        type_stats[t]["count"] += 1
-        type_stats[t]["value"] += val
-
-    portfolio_total = total_value if total_value > 0 else 1
-
-    st.subheader("Wealth Plan Snapshot")
-    plan_target = user_settings.get("wealth_target_net_worth", 0.0)
-    plan_target_date = user_settings.get("wealth_target_date", "")
-    plan_risk = user_settings.get("wealth_risk_profile", "Balanced")
-    plan_horizon = user_settings.get("wealth_horizon_years", 10)
-    plan_tolerance = float(user_settings.get("wealth_rebalance_tolerance", 5.0))
-    plan_allocations = user_settings.get("wealth_target_allocations", {}) or {}
-    plan_notes = user_settings.get("wealth_advisor_notes", "")
-
-    if plan_target <= 0 and not plan_allocations and not plan_notes:
-        st.info("Set your Wealth Plan in Settings to unlock target tracking and rebalancing insights.")
+    if not has_plan_at_least(user_settings, "Pro"):
+        render_plan_gate(user_settings, "Pro", "Portfolio Stats", "Upgrade to unlock detailed stats and planning snapshots.", key="gate_stats")
     else:
-        col_a, col_b, col_c = st.columns(3)
-        liabilities_total = get_total_liabilities_value(liabilities, entity_view)
-        net_worth = total_value - liabilities_total
-        col_a.metric("Current Net Worth", format_currency(net_worth, currency_symbol, currency_rate))
-        if plan_target > 0:
-            progress_pct = (net_worth / plan_target) * 100 if plan_target else 0
-            col_b.metric("Target Net Worth", format_currency(plan_target, currency_symbol, currency_rate), f"{progress_pct:.1f}%")
-        else:
-            col_b.metric("Target Net Worth", "Not set")
-        col_c.metric("Risk Profile", plan_risk)
-        st.caption(f"Horizon: {int(plan_horizon)} years • Rebalance tolerance: {plan_tolerance:.1f}%")
+        col1, col2, col3, col4 = st.columns(4)
+        entity_view = st.session_state.get("portfolio_entity_view", "All")
+        view_items = build_portfolio_view_items(portfolio, entity_view)
+        if entity_view != "All":
+            st.caption(f"Viewing: {entity_view}")
+        total_value = sum(ai_valuation(item["asset"])[0] * item["share"] for item in view_items)
+        total_assets = len(view_items)
+        physical_assets = len([item for item in view_items if not item["asset"].get("ticker")])
+        financial_assets = total_assets - physical_assets
 
-        if plan_target_date:
-            try:
-                target_dt = datetime.fromisoformat(plan_target_date)
-                days_left = (target_dt.date() - datetime.now().date()).days
-                st.caption(f"Target date: {format_date_for_settings(target_dt, user_settings)} • {days_left} days remaining")
-            except Exception:
-                st.caption(f"Target date: {plan_target_date}")
+        with col1:
+            st.metric("Total Assets", total_assets)
+        with col2:
+            st.metric("Physical Items", physical_assets)
+        with col3:
+            st.metric("Financial Assets", financial_assets)
+        with col4:
+            avg_value = total_value / total_assets if total_assets > 0 else 0
+            st.metric("Avg Asset Value", format_currency(avg_value, currency_symbol, currency_rate))
 
-        if plan_notes:
-            st.info(plan_notes)
-
-        if plan_allocations:
-            alloc_rows = []
-            for asset_type, target_pct in plan_allocations.items():
-                actual_pct = (type_stats.get(asset_type, {}).get("value", 0) / portfolio_total) * 100 if portfolio_total else 0
-                gap = actual_pct - float(target_pct)
-                alloc_rows.append({
-                    "Type": asset_type,
-                    "Actual %": round(actual_pct, 1),
-                    "Target %": round(float(target_pct), 1),
-                    "Gap %": round(gap, 1)
-                })
-            alloc_df = pd.DataFrame(alloc_rows)
-            st.dataframe(alloc_df, width="stretch", hide_index=True)
-
-            rebalance_candidates = [row for row in alloc_rows if abs(row["Gap %"]) >= plan_tolerance]
-            if rebalance_candidates:
-                st.markdown("**Rebalance Suggestions**")
-                for row in rebalance_candidates:
-                    direction = "Reduce" if row["Gap %"] > 0 else "Increase"
-                    st.write(f"- {direction} {row['Type']} by {abs(row['Gap %']):.1f}% to hit target.")
-
-    st.subheader("Detailed Statistics")
-
-    stats_df = pd.DataFrame([
-        {
-            "Type": t,
-            "Count": data["count"],
-            "Total Value": format_currency(data["value"], currency_symbol, currency_rate),
-            "Avg per Item": format_currency(data["value"]/data["count"], currency_symbol, currency_rate) if data["count"] > 0 else format_currency(0, currency_symbol, currency_rate),
-            "% of Portfolio": f"{(data['value']/portfolio_total)*100:.1f}%"
-        } for t, data in type_stats.items()
-    ])
-    
-    st.dataframe(stats_df, width="stretch", hide_index=True)
-    
-    # Condition distribution
-    st.subheader("Condition Distribution")
-    condition_counts = {}
-    for item in view_items:
-        asset = item["asset"]
-        c = asset["condition"]
-        condition_counts[c] = condition_counts.get(c, 0) + 1
-    
-    if condition_counts:
-        if PLOTLY_AVAILABLE:
-            fig_cond = go.Figure(data=[go.Bar(
-                x=list(condition_counts.keys()),
-                y=list(condition_counts.values()),
-                marker_color=[get_condition_color(c) for c in condition_counts.keys()],
-                text=list(condition_counts.values()),
-                textposition='auto',
-                textfont=dict(color=plotly_text_color)
-            )])
-            fig_cond.update_layout(
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                xaxis=dict(color=plotly_text_color, title='Condition'),
-                yaxis=dict(color=plotly_text_color, showgrid=True, gridcolor=plotly_grid_color),
-                height=300,
-                font=dict(color=plotly_text_color)
-            )
-            st.plotly_chart(fig_cond, width="stretch")
-        else:
-            cond_df = pd.DataFrame({
-                'Condition': list(condition_counts.keys()),
-                'Count': list(condition_counts.values())
-            }).set_index('Condition')
-            st.bar_chart(cond_df)
-
-    st.subheader("Entity & Custody Breakdown")
-    if entity_view == "All":
-        entity_stats = {}
-        for asset in portfolio:
-            wealth = asset.get("wealth", {})
-            split = wealth.get("ownership_split") if isinstance(wealth.get("ownership_split"), dict) else {}
+        # Asset type breakdown (used in wealth plan + stats)
+        type_stats = {}
+        for item in view_items:
+            asset = item["asset"]
+            t = asset["type"]
             val, _, _ = ai_valuation(asset)
-            if split:
-                for ent_name, pct in split.items():
-                    try:
-                        share = float(pct) / 100.0
-                    except Exception:
-                        continue
-                    if ent_name not in entity_stats:
-                        entity_stats[ent_name] = {"count": 0, "value": 0}
-                    entity_stats[ent_name]["count"] += 1
-                    entity_stats[ent_name]["value"] += val * share
-            else:
-                entity = wealth.get("owner_entity") or "Unassigned"
-                if entity not in entity_stats:
-                    entity_stats[entity] = {"count": 0, "value": 0}
-                entity_stats[entity]["count"] += 1
-                entity_stats[entity]["value"] += val
-        if entity_stats:
-            entity_df = pd.DataFrame([
-                {
-                    "Entity": entity,
-                    "Count": data["count"],
-                    "Total Value": format_currency(data["value"], currency_symbol, currency_rate)
-                } for entity, data in entity_stats.items()
-            ])
-            st.dataframe(entity_df, width="stretch", hide_index=True)
+            val *= item["share"]
+            if t not in type_stats:
+                type_stats[t] = {"count": 0, "value": 0}
+            type_stats[t]["count"] += 1
+            type_stats[t]["value"] += val
+
+        portfolio_total = total_value if total_value > 0 else 1
+
+        st.subheader("Wealth Plan Snapshot")
+        plan_target = user_settings.get("wealth_target_net_worth", 0.0)
+        plan_target_date = user_settings.get("wealth_target_date", "")
+        plan_risk = user_settings.get("wealth_risk_profile", "Balanced")
+        plan_horizon = user_settings.get("wealth_horizon_years", 10)
+        plan_tolerance = float(user_settings.get("wealth_rebalance_tolerance", 5.0))
+        plan_allocations = user_settings.get("wealth_target_allocations", {}) or {}
+        plan_notes = user_settings.get("wealth_advisor_notes", "")
+
+        if plan_target <= 0 and not plan_allocations and not plan_notes:
+            st.info("Set your Wealth Plan in Settings to unlock target tracking and rebalancing insights.")
         else:
-            st.info("Add owner/entity info in Wealth Management to see this breakdown.")
-    else:
-        st.info("Entity breakdown is available in the consolidated view.")
+            col_a, col_b, col_c = st.columns(3)
+            liabilities_total = get_total_liabilities_value(liabilities, entity_view)
+            net_worth = total_value - liabilities_total
+            col_a.metric("Current Net Worth", format_currency(net_worth, currency_symbol, currency_rate))
+            if plan_target > 0:
+                progress_pct = (net_worth / plan_target) * 100 if plan_target else 0
+                col_b.metric("Target Net Worth", format_currency(plan_target, currency_symbol, currency_rate), f"{progress_pct:.1f}%")
+            else:
+                col_b.metric("Target Net Worth", "Not set")
+            col_c.metric("Risk Profile", plan_risk)
+            st.caption(f"Horizon: {int(plan_horizon)} years • Rebalance tolerance: {plan_tolerance:.1f}%")
 
-    st.subheader("Upcoming Reviews")
-    review_rows = []
-    today = datetime.now().date()
-    for item in view_items:
-        asset = item["asset"]
-        review_raw = asset.get("wealth", {}).get("review_date")
-        if not review_raw:
-            continue
-        try:
-            review_dt = datetime.fromisoformat(str(review_raw)).date()
-        except Exception:
-            continue
-        review_rows.append({
-            "Asset": asset.get("name", "Asset"),
-            "Review Date": review_dt,
-            "Days Until": (review_dt - today).days
-        })
-    if review_rows:
-        review_rows.sort(key=lambda x: x["Review Date"])
-        review_df = pd.DataFrame(review_rows)
-        review_df["Review Date"] = review_df["Review Date"].astype(str)
-        st.dataframe(review_df, width="stretch", hide_index=True)
-    else:
-        st.info("No upcoming reviews set. Add review dates in Wealth Management.")
+            if plan_target_date:
+                try:
+                    target_dt = datetime.fromisoformat(plan_target_date)
+                    days_left = (target_dt.date() - datetime.now().date()).days
+                    st.caption(f"Target date: {format_date_for_settings(target_dt, user_settings)} • {days_left} days remaining")
+                except Exception:
+                    st.caption(f"Target date: {plan_target_date}")
 
-    st.subheader("Insurance Coverage")
-    insured_total = 0.0
-    for item in view_items:
-        asset = item["asset"]
-        insured_total += float(asset.get("wealth", {}).get("insured_value", 0.0) or 0.0) * item["share"]
-    if insured_total > 0:
-        coverage_pct = (insured_total / total_value * 100) if total_value else 0
-        st.metric("Total Insured Value", format_currency(insured_total, currency_symbol, currency_rate), f"{coverage_pct:.1f}% of portfolio")
-    else:
-        st.info("Add insured values in Wealth Management to track coverage.")
+            if plan_notes:
+                st.info(plan_notes)
+
+            if plan_allocations:
+                alloc_rows = []
+                for asset_type, target_pct in plan_allocations.items():
+                    actual_pct = (type_stats.get(asset_type, {}).get("value", 0) / portfolio_total) * 100 if portfolio_total else 0
+                    gap = actual_pct - float(target_pct)
+                    alloc_rows.append({
+                        "Type": asset_type,
+                        "Actual %": round(actual_pct, 1),
+                        "Target %": round(float(target_pct), 1),
+                        "Gap %": round(gap, 1)
+                    })
+                alloc_df = pd.DataFrame(alloc_rows)
+                st.dataframe(alloc_df, width="stretch", hide_index=True)
+
+                rebalance_candidates = [row for row in alloc_rows if abs(row["Gap %"]) >= plan_tolerance]
+                if rebalance_candidates:
+                    st.markdown("**Rebalance Suggestions**")
+                    for row in rebalance_candidates:
+                        direction = "Reduce" if row["Gap %"] > 0 else "Increase"
+                        st.write(f"- {direction} {row['Type']} by {abs(row['Gap %']):.1f}% to hit target.")
+
+        st.subheader("Detailed Statistics")
+
+        stats_df = pd.DataFrame([
+            {
+                "Type": t,
+                "Count": data["count"],
+                "Total Value": format_currency(data["value"], currency_symbol, currency_rate),
+                "Avg per Item": format_currency(data["value"]/data["count"], currency_symbol, currency_rate) if data["count"] > 0 else format_currency(0, currency_symbol, currency_rate),
+                "% of Portfolio": f"{(data['value']/portfolio_total)*100:.1f}%"
+            } for t, data in type_stats.items()
+        ])
+
+        st.dataframe(stats_df, width="stretch", hide_index=True)
+
+        # Condition distribution
+        st.subheader("Condition Distribution")
+        condition_counts = {}
+        for item in view_items:
+            asset = item["asset"]
+            c = asset["condition"]
+            condition_counts[c] = condition_counts.get(c, 0) + 1
+
+        if condition_counts:
+            if PLOTLY_AVAILABLE:
+                fig_cond = go.Figure(data=[go.Bar(
+                    x=list(condition_counts.keys()),
+                    y=list(condition_counts.values()),
+                    marker_color=[get_condition_color(c) for c in condition_counts.keys()],
+                    text=list(condition_counts.values()),
+                    textposition='auto',
+                    textfont=dict(color=plotly_text_color)
+                )])
+                fig_cond.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    xaxis=dict(color=plotly_text_color, title='Condition'),
+                    yaxis=dict(color=plotly_text_color, showgrid=True, gridcolor=plotly_grid_color),
+                    height=300,
+                    font=dict(color=plotly_text_color)
+                )
+                st.plotly_chart(fig_cond, width="stretch")
+            else:
+                cond_df = pd.DataFrame({
+                    'Condition': list(condition_counts.keys()),
+                    'Count': list(condition_counts.values())
+                }).set_index('Condition')
+                st.bar_chart(cond_df)
+
+        st.subheader("Entity & Custody Breakdown")
+        if entity_view == "All":
+            entity_stats = {}
+            for asset in portfolio:
+                wealth = asset.get("wealth", {})
+                split = wealth.get("ownership_split") if isinstance(wealth.get("ownership_split"), dict) else {}
+                val, _, _ = ai_valuation(asset)
+                if split:
+                    for ent_name, pct in split.items():
+                        try:
+                            share = float(pct) / 100.0
+                        except Exception:
+                            continue
+                        if ent_name not in entity_stats:
+                            entity_stats[ent_name] = {"count": 0, "value": 0}
+                        entity_stats[ent_name]["count"] += 1
+                        entity_stats[ent_name]["value"] += val * share
+                else:
+                    entity = wealth.get("owner_entity") or "Unassigned"
+                    if entity not in entity_stats:
+                        entity_stats[entity] = {"count": 0, "value": 0}
+                    entity_stats[entity]["count"] += 1
+                    entity_stats[entity]["value"] += val
+            if entity_stats:
+                entity_df = pd.DataFrame([
+                    {
+                        "Entity": entity,
+                        "Count": data["count"],
+                        "Total Value": format_currency(data["value"], currency_symbol, currency_rate)
+                    } for entity, data in entity_stats.items()
+                ])
+                st.dataframe(entity_df, width="stretch", hide_index=True)
+            else:
+                st.info("Add owner/entity info in Wealth Management to see this breakdown.")
+        else:
+            st.info("Entity breakdown is available in the consolidated view.")
+
+        st.subheader("Upcoming Reviews")
+        review_rows = []
+        today = datetime.now().date()
+        for item in view_items:
+            asset = item["asset"]
+            review_raw = asset.get("wealth", {}).get("review_date")
+            if not review_raw:
+                continue
+            try:
+                review_dt = datetime.fromisoformat(str(review_raw)).date()
+            except Exception:
+                continue
+            review_rows.append({
+                "Asset": asset.get("name", "Asset"),
+                "Review Date": review_dt,
+                "Days Until": (review_dt - today).days
+            })
+        if review_rows:
+            review_rows.sort(key=lambda x: x["Review Date"])
+            review_df = pd.DataFrame(review_rows)
+            review_df["Review Date"] = review_df["Review Date"].astype(str)
+            st.dataframe(review_df, width="stretch", hide_index=True)
+        else:
+            st.info("No upcoming reviews set. Add review dates in Wealth Management.")
+
+        st.subheader("Insurance Coverage")
+        insured_total = 0.0
+        for item in view_items:
+            asset = item["asset"]
+            insured_total += float(asset.get("wealth", {}).get("insured_value", 0.0) or 0.0) * item["share"]
+        if insured_total > 0:
+            coverage_pct = (insured_total / total_value * 100) if total_value else 0
+            st.metric("Total Insured Value", format_currency(insured_total, currency_symbol, currency_rate), f"{coverage_pct:.1f}% of portfolio")
+        else:
+            st.info("Add insured values in Wealth Management to track coverage.")
 
 # ==============================
 # TAB 5: ADD ASSET (ENHANCED WITH AUTO-IMAGE)
@@ -8044,6 +8160,26 @@ with tab8:
     except ValueError:
         current_index = 0
 
+    st.markdown("### Subscription")
+    current_plan = normalize_plan(settings.get("subscription_plan"))
+    plan_options = SUBSCRIPTION_PLANS
+    plan_index = plan_options.index(current_plan) if current_plan in plan_options else 0
+    plan_choice = st.radio("Plan", plan_options, index=plan_index, horizontal=True)
+    st.caption(PLAN_DESCRIPTIONS.get(plan_choice, ""))
+    if plan_choice == "Founder":
+        st.info("Founder plan includes all Elite features plus early access and founder perks.")
+    subscription_status = st.selectbox(
+        "Status",
+        ["active", "trial", "expired"],
+        index=["active", "trial", "expired"].index(settings.get("subscription_status", "active"))
+        if settings.get("subscription_status", "active") in ["active", "trial", "expired"] else 0
+    )
+    subscription_renews = st.text_input(
+        "Renewal date (optional)",
+        value=settings.get("subscription_renews", "")
+    )
+    st.caption("This panel will sync with Stripe in production. For now, it controls feature access locally.")
+
     st.markdown("### API Keys & Live Data")
     st.caption("For production, store keys in `.streamlit/secrets.toml` so they never touch local data files.")
     with st.expander("Secrets file template (recommended for deployment)"):
@@ -8476,69 +8612,79 @@ with tab8:
         step=1
     )
 
+    plan_target_input = to_display_currency(settings.get("wealth_target_net_worth", 0.0), currency_rate)
+    plan_date_store = settings.get("wealth_target_date", "")
+    plan_risk_profile = settings.get("wealth_risk_profile", "Balanced")
+    plan_horizon = int(settings.get("wealth_horizon_years", 10))
+    plan_rebalance_tolerance = float(settings.get("wealth_rebalance_tolerance", 5.0))
+    alloc_inputs = {k: float(v) for k, v in (settings.get("wealth_target_allocations", {}) or {}).items()}
+    plan_notes = settings.get("wealth_advisor_notes", "")
+
     st.markdown("### Wealth Plan")
-    country_code = get_country_code()
-    country_name = get_country_name(country_code)
-    st.caption(f"Set targets and allocations to guide long‑term, generational wealth planning in {country_name}.")
-    plan_target_display = to_display_currency(settings.get("wealth_target_net_worth", 0.0), currency_rate)
-    plan_target_input = st.number_input(
-        f"Target Net Worth ({currency_code})",
-        min_value=0.0,
-        value=float(plan_target_display),
-        step=1000.0
-    )
-    plan_date_raw = settings.get("wealth_target_date", "")
-    plan_date_enabled = st.checkbox("Set target date", value=bool(plan_date_raw))
-    if plan_date_enabled:
-        try:
-            plan_date_value = datetime.fromisoformat(plan_date_raw).date() if plan_date_raw else datetime.now().date()
-        except Exception:
-            plan_date_value = datetime.now().date()
-        plan_date_picked = st.date_input("Target Date", value=plan_date_value)
-        plan_date_store = plan_date_picked.isoformat()
+    if not has_plan_at_least(settings, "Pro"):
+        render_plan_gate(settings, "Pro", "Wealth Plan", "Upgrade to set targets, allocations, and advisor notes.", key="gate_wealth_plan")
     else:
-        plan_date_store = ""
-
-    plan_risk_profile = st.selectbox(
-        "Risk Profile",
-        WEALTH_RISK_PROFILES,
-        index=WEALTH_RISK_PROFILES.index(settings.get("wealth_risk_profile", "Balanced"))
-        if settings.get("wealth_risk_profile", "Balanced") in WEALTH_RISK_PROFILES else 1
-    )
-    plan_horizon = st.number_input(
-        "Investment Horizon (years)",
-        min_value=1,
-        max_value=60,
-        value=int(settings.get("wealth_horizon_years", 10)),
-        step=1
-    )
-    plan_rebalance_tolerance = st.number_input(
-        "Rebalance tolerance (%)",
-        min_value=1.0,
-        max_value=50.0,
-        value=float(settings.get("wealth_rebalance_tolerance", 5.0)),
-        step=0.5
-    )
-
-    st.markdown("#### Target Allocation (%)")
-    asset_type_options = ASSET_TYPE_OPTIONS
-    alloc_inputs = {}
-    saved_allocations = settings.get("wealth_target_allocations", {}) or {}
-    for asset_type in asset_type_options:
-        alloc_inputs[asset_type] = st.number_input(
-            f"{asset_type}",
+        country_code = get_country_code()
+        country_name = get_country_name(country_code)
+        st.caption(f"Set targets and allocations to guide long‑term, generational wealth planning in {country_name}.")
+        plan_target_display = plan_target_input
+        plan_target_input = st.number_input(
+            f"Target Net Worth ({currency_code})",
             min_value=0.0,
-            max_value=100.0,
-            value=float(saved_allocations.get(asset_type, 0.0)),
-            step=1.0,
-            key=f"alloc_{asset_type}"
+            value=float(plan_target_display),
+            step=1000.0
         )
-    total_alloc = sum(alloc_inputs.values())
-    if total_alloc > 0 and abs(total_alloc - 100.0) > 0.5:
-        st.warning(f"Allocations total {total_alloc:.1f}% (aim for 100%).")
+        plan_date_raw = plan_date_store
+        plan_date_enabled = st.checkbox("Set target date", value=bool(plan_date_raw))
+        if plan_date_enabled:
+            try:
+                plan_date_value = datetime.fromisoformat(plan_date_raw).date() if plan_date_raw else datetime.now().date()
+            except Exception:
+                plan_date_value = datetime.now().date()
+            plan_date_picked = st.date_input("Target Date", value=plan_date_value)
+            plan_date_store = plan_date_picked.isoformat()
+        else:
+            plan_date_store = ""
 
-    plan_notes = st.text_area("Advisor Notes", value=settings.get("wealth_advisor_notes", ""))
+        plan_risk_profile = st.selectbox(
+            "Risk Profile",
+            WEALTH_RISK_PROFILES,
+            index=WEALTH_RISK_PROFILES.index(settings.get("wealth_risk_profile", "Balanced"))
+            if settings.get("wealth_risk_profile", "Balanced") in WEALTH_RISK_PROFILES else 1
+        )
+        plan_horizon = st.number_input(
+            "Investment Horizon (years)",
+            min_value=1,
+            max_value=60,
+            value=int(settings.get("wealth_horizon_years", 10)),
+            step=1
+        )
+        plan_rebalance_tolerance = st.number_input(
+            "Rebalance tolerance (%)",
+            min_value=1.0,
+            max_value=50.0,
+            value=float(settings.get("wealth_rebalance_tolerance", 5.0)),
+            step=0.5
+        )
 
+        st.markdown("#### Target Allocation (%)")
+        asset_type_options = ASSET_TYPE_OPTIONS
+        alloc_inputs = {}
+        saved_allocations = settings.get("wealth_target_allocations", {}) or {}
+        for asset_type in asset_type_options:
+            alloc_inputs[asset_type] = st.number_input(
+                f"{asset_type}",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(saved_allocations.get(asset_type, 0.0)),
+                step=1.0,
+                key=f"alloc_{asset_type}"
+            )
+        total_alloc = sum(alloc_inputs.values())
+        if total_alloc > 0 and abs(total_alloc - 100.0) > 0.5:
+            st.warning(f"Allocations total {total_alloc:.1f}% (aim for 100%).")
+
+        plan_notes = st.text_area("Advisor Notes", value=settings.get("wealth_advisor_notes", ""))
     st.markdown("### Backup & Import")
     export_json = json.dumps(user_record, indent=2)
     st.download_button("Export JSON", data=export_json, file_name=f"{user}_portfolio.json", mime="application/json")
@@ -8749,7 +8895,11 @@ with tab8:
             "supabase_use_service_role": bool(supabase_use_service_role),
             "supabase_auth_required": bool(supabase_auth_required_to_save),
             "storage_provider": storage_provider_to_save,
-            "community_policy_mode": community_policy_mode_to_save
+            "community_policy_mode": community_policy_mode_to_save,
+            "subscription_plan": normalize_plan(plan_choice),
+            "subscription_status": subscription_status,
+            "subscription_renews": subscription_renews.strip(),
+            "subscription_source": settings.get("subscription_source", "Local")
         }
         meta = get_meta(db)
         meta["community_config"] = {
@@ -9095,69 +9245,44 @@ if bullion_tab is not None:
 # ==============================
 if forum_tab is not None:
     with forum_tab:
-        supabase_connected = supabase_enabled(community_settings)
-        auth_required = supabase_auth_required(community_settings)
-        auth_user = get_supabase_auth_user(community_settings) if auth_required else None
-        auth_email = get_supabase_auth_email(community_settings) if auth_required else ""
-        auth_user_id = get_supabase_auth_user_id(community_settings) if auth_required else None
-        if auth_required:
-            st.markdown("### Community Account")
-            url_check, anon_check, _ = get_supabase_config(community_settings)
-            if not anon_check:
-                st.warning("Supabase anon key is required for Community Auth.")
-            if not supabase_connected:
-                st.warning("Supabase is not configured. Community sign-in is unavailable.")
-            elif auth_user:
-                st.success(f"Signed in to Community as {auth_email}")
-                if st.button("Sign out of Community", key="community_signout"):
-                    clear_supabase_auth_state()
-                    st.rerun()
-            else:
-                with st.form("community_signin"):
-                    email = st.text_input("Email")
-                    password = st.text_input("Password", type="password")
-                    submit_signin = st.form_submit_button("Sign In")
-                with st.expander("Create Community Account"):
-                    with st.form("community_signup"):
-                        new_email = st.text_input("Email", key="community_signup_email")
-                        new_password = st.text_input("Password", type="password", key="community_signup_password")
-                        confirm_password = st.text_input("Confirm Password", type="password", key="community_signup_confirm")
-                        submit_signup = st.form_submit_button("Create Account")
-                if submit_signin:
-                    if not email or not password:
-                        st.error("Enter email and password.")
-                    else:
-                        auth_data, err = supabase_auth_sign_in(community_settings, email, password)
-                        if err:
-                            st.error(f"Sign in failed: {err}")
+        if not has_plan_at_least(user_settings, "Elite"):
+            render_plan_gate(user_settings, "Elite", "Community Market", "Upgrade to post listings, message sellers, and join the marketplace.", key="gate_community")
+        else:
+            supabase_connected = supabase_enabled(community_settings)
+            auth_required = supabase_auth_required(community_settings)
+            auth_user = get_supabase_auth_user(community_settings) if auth_required else None
+            auth_email = get_supabase_auth_email(community_settings) if auth_required else ""
+            auth_user_id = get_supabase_auth_user_id(community_settings) if auth_required else None
+            if auth_required:
+                st.markdown("### Community Account")
+                url_check, anon_check, _ = get_supabase_config(community_settings)
+                if not anon_check:
+                    st.warning("Supabase anon key is required for Community Auth.")
+                if not supabase_connected:
+                    st.warning("Supabase is not configured. Community sign-in is unavailable.")
+                elif auth_user:
+                    st.success(f"Signed in to Community as {auth_email}")
+                    if st.button("Sign out of Community", key="community_signout"):
+                        clear_supabase_auth_state()
+                        st.rerun()
+                else:
+                    with st.form("community_signin"):
+                        email = st.text_input("Email")
+                        password = st.text_input("Password", type="password")
+                        submit_signin = st.form_submit_button("Sign In")
+                    with st.expander("Create Community Account"):
+                        with st.form("community_signup"):
+                            new_email = st.text_input("Email", key="community_signup_email")
+                            new_password = st.text_input("Password", type="password", key="community_signup_password")
+                            confirm_password = st.text_input("Confirm Password", type="password", key="community_signup_confirm")
+                            submit_signup = st.form_submit_button("Create Account")
+                    if submit_signin:
+                        if not email or not password:
+                            st.error("Enter email and password.")
                         else:
-                            access_token = auth_data.get("access_token")
-                            refresh_token = auth_data.get("refresh_token")
-                            expires_in = auth_data.get("expires_in") or 3600
-                            user_obj = auth_data.get("user") or {}
-                            set_supabase_auth_state({
-                                "access_token": access_token,
-                                "refresh_token": refresh_token,
-                                "expires_at": time.time() + int(expires_in),
-                                "user": user_obj
-                            })
-                            community_sync_user(community_settings, db, user)
-                            st.success("Community sign-in successful.")
-                            st.rerun()
-                if submit_signup:
-                    pw_error = validate_password_strength(new_password)
-                    if pw_error:
-                        st.error(pw_error)
-                    elif new_password != confirm_password:
-                        st.error("Passwords do not match.")
-                    else:
-                        signup_data, err = supabase_auth_sign_up(community_settings, new_email, new_password)
-                        if err:
-                            st.error(f"Sign up failed: {err}")
-                        else:
-                            auth_data, err = supabase_auth_sign_in(community_settings, new_email, new_password)
+                            auth_data, err = supabase_auth_sign_in(community_settings, email, password)
                             if err:
-                                st.warning("Account created. Please sign in.")
+                                st.error(f"Sign in failed: {err}")
                             else:
                                 access_token = auth_data.get("access_token")
                                 refresh_token = auth_data.get("refresh_token")
@@ -9170,1467 +9295,352 @@ if forum_tab is not None:
                                     "user": user_obj
                                 })
                                 community_sync_user(community_settings, db, user)
-                                st.success("Community account created and signed in.")
+                                st.success("Community sign-in successful.")
                                 st.rerun()
-                st.info("Sign in to access the Community Market.")
+                    if submit_signup:
+                        pw_error = validate_password_strength(new_password)
+                        if pw_error:
+                            st.error(pw_error)
+                        elif new_password != confirm_password:
+                            st.error("Passwords do not match.")
+                        else:
+                            signup_data, err = supabase_auth_sign_up(community_settings, new_email, new_password)
+                            if err:
+                                st.error(f"Sign up failed: {err}")
+                            else:
+                                auth_data, err = supabase_auth_sign_in(community_settings, new_email, new_password)
+                                if err:
+                                    st.warning("Account created. Please sign in.")
+                                else:
+                                    access_token = auth_data.get("access_token")
+                                    refresh_token = auth_data.get("refresh_token")
+                                    expires_in = auth_data.get("expires_in") or 3600
+                                    user_obj = auth_data.get("user") or {}
+                                    set_supabase_auth_state({
+                                        "access_token": access_token,
+                                        "refresh_token": refresh_token,
+                                        "expires_at": time.time() + int(expires_in),
+                                        "user": user_obj
+                                    })
+                                    community_sync_user(community_settings, db, user)
+                                    st.success("Community account created and signed in.")
+                                    st.rerun()
+                    st.info("Sign in to access the Community Market.")
 
-        community_ready = True
-        schema_ok = None
-        schema_err = None
-        if supabase_connected:
-            schema_ok, schema_err = supabase_check_table(
-                community_settings,
-                "community_posts",
-                use_service_key=community_use_service_role(community_settings),
-                auth_token=community_auth_token(community_settings)
-            )
-            if not schema_ok:
+            community_ready = True
+            schema_ok = None
+            schema_err = None
+            if supabase_connected:
+                schema_ok, schema_err = supabase_check_table(
+                    community_settings,
+                    "community_posts",
+                    use_service_key=community_use_service_role(community_settings),
+                    auth_token=community_auth_token(community_settings)
+                )
+                if not schema_ok:
+                    community_ready = False
+            if auth_required and not auth_user:
                 community_ready = False
-        if auth_required and not auth_user:
-            community_ready = False
 
-        forum_posts = []
-        posts_err = None
-        if community_ready:
-            forum_posts, posts_err = community_get_posts(community_settings, db)
-            if posts_err:
-                st.error(f"Community backend error: {posts_err}")
-                forum_posts = []
-            if auth_required and auth_user_id:
-                legacy_posts = [post for post in forum_posts if post.get("created_by") == user and not post.get("owner_id")]
-                if legacy_posts:
-                    st.warning("Some of your older listings predate Supabase Auth. Ask an admin to backfill owner_id or recreate those listings to enable edits.")
+            forum_posts = []
+            posts_err = None
+            if community_ready:
+                forum_posts, posts_err = community_get_posts(community_settings, db)
+                if posts_err:
+                    st.error(f"Community backend error: {posts_err}")
+                    forum_posts = []
+                if auth_required and auth_user_id:
+                    legacy_posts = [post for post in forum_posts if post.get("created_by") == user and not post.get("owner_id")]
+                    if legacy_posts:
+                        st.warning("Some of your older listings predate Supabase Auth. Ask an admin to backfill owner_id or recreate those listings to enable edits.")
 
-        if community_ready:
-            role = community_get_role(community_settings, db, user)
-            is_mod = role in ("admin", "moderator")
-            is_banned = community_is_banned(community_settings, db, user)
-        else:
-            role = None
-            is_mod = False
-            is_banned = False
-
-        column_support = st.session_state.get("community_column_support")
-        if supabase_enabled(community_settings) and community_ready and column_support is None:
-            column_results = supabase_check_columns(
-                community_settings,
-                "community_posts",
-                list(COMMUNITY_POSTS_EXTRA_COLUMNS.keys()),
-                use_service_key=community_use_service_role(community_settings),
-                auth_token=community_auth_token(community_settings)
-            )
-            column_support = {col: ok for col, ok, _ in column_results}
-            st.session_state.community_column_support = column_support
-        if column_support is None:
-            column_support = {}
-        supports_reserve = column_support.get("reserve_amount", True) or not supabase_enabled(community_settings)
-        supports_buy_now = column_support.get("buy_now_price", True) or not supabase_enabled(community_settings)
-        supports_images = column_support.get("images", True) or not supabase_enabled(community_settings)
-        supports_owner_id = column_support.get("owner_id", True) or not supabase_enabled(community_settings)
-        supports_grading_company = column_support.get("grading_company", True) or not supabase_enabled(community_settings)
-        supports_grading_grade = column_support.get("grading_grade", True) or not supabase_enabled(community_settings)
-        supports_grading = supports_grading_company and supports_grading_grade
-        if supabase_auth_required(community_settings) and not supports_owner_id:
-            st.warning("Supabase schema is missing the owner_id column. Run the migration helper before using Community Auth.")
-
-        if "edit_listing_id" not in st.session_state:
-            st.session_state.edit_listing_id = None
-        if "edit_listing_origin" not in st.session_state:
-            st.session_state.edit_listing_origin = "browse"
-        if "market_selected_post_id" not in st.session_state:
-            st.session_state.market_selected_post_id = None
-        if "market_watchlist" not in st.session_state:
-            stored_watchlist = user_settings.get("market_watchlist") or []
-            st.session_state.market_watchlist = set(stored_watchlist)
-        if "market_saved_searches" not in st.session_state:
-            st.session_state.market_saved_searches = user_settings.get("market_saved_searches") or []
-
-        if is_banned:
-            st.warning("Your account is suspended from posting, bidding, or messaging in the community.")
-        else:
-            st.info("Community Rules apply to listings, comments, and messages. Violations are blocked.")
-
-        forum_tabs = ["Browse", "Watchlist", "Create Listing", "My Listings", "Messages"]
-        if is_mod:
-            forum_tabs.append("Moderation")
-        forum_tabs = st.tabs(forum_tabs)
-
-        def normalize_forum_datetime(dt_value):
-            if not isinstance(dt_value, datetime):
-                return dt_value
-            if dt_value.tzinfo is not None:
-                try:
-                    dt_value = dt_value.astimezone().replace(tzinfo=None)
-                except Exception:
-                    dt_value = dt_value.replace(tzinfo=None)
-            return dt_value
-
-        def parse_forum_date(value):
-            if not value:
-                return datetime.min
-            try:
-                parsed = datetime.fromisoformat(value)
-            except Exception:
-                return datetime.min
-            return normalize_forum_datetime(parsed)
-
-        def forum_now():
-            now_dt = get_now_for_settings(user_settings)
-            return normalize_forum_datetime(now_dt)
-
-        def is_recent_listing(post, days=7):
-            created_at = post.get("created_at")
-            created_dt = parse_forum_date(created_at)
-            if created_dt == datetime.min:
-                return False
-            return (forum_now() - created_dt).days <= days
-
-        def get_auction_fields(post):
-            if post.get("auction"):
-                auction = post.get("auction", {})
-                return (
-                    auction.get("starting_bid", 0.0),
-                    auction.get("min_increment", 0.0),
-                    auction.get("end_date")
-                )
-            return (
-                post.get("auction_starting_bid", 0.0),
-                post.get("auction_min_increment", 0.0),
-                post.get("auction_end_date")
-            )
-
-        def get_reserve_amount(post):
-            if post.get("auction"):
-                return post.get("auction", {}).get("reserve_amount")
-            return post.get("reserve_amount")
-
-        def get_buy_now_price(post):
-            if post.get("auction"):
-                return post.get("auction", {}).get("buy_now_price")
-            return post.get("buy_now_price")
-
-        def get_post_images(post):
-            images = post.get("images") or []
-            display = []
-            for img in images:
-                if isinstance(img, dict) and img.get("data"):
-                    mime = img.get("mime") or "image/png"
-                    display.append(f"data:{mime};base64,{img.get('data')}")
-                elif isinstance(img, str):
-                    display.append(img)
-            return display[:5]
-
-        def get_listing_card_image(post):
-            images = get_post_images(post)
-            if images:
-                return images[0]
-            title = post.get("title") or post.get("category") or "listing"
-            return search_asset_image(str(title))
-
-        def get_listing_price_value(post):
-            listing_type = post.get("listing_type", "Discussion")
-            if listing_type == "For Sale":
-                return post.get("price")
-            if listing_type == "Auction":
-                starting_bid, _, _ = get_auction_fields(post)
-                return starting_bid or post.get("price")
-            return None
-
-        def get_auction_end_dt(post):
-            _, _, end_date = get_auction_fields(post)
-            if not end_date:
-                return None
-            raw = str(end_date)
-            try:
-                end_dt = datetime.fromisoformat(raw)
-            except Exception:
-                try:
-                    end_dt = datetime.strptime(raw, "%Y-%m-%d")
-                except Exception:
-                    return None
-            if "T" not in raw:
-                end_dt = end_dt.replace(hour=23, minute=59, second=59)
-            return normalize_forum_datetime(end_dt)
-
-        def clamp_price_range(saved_range, min_price, max_price):
-            if not saved_range or len(saved_range) != 2:
-                return (min_price, max_price)
-            try:
-                low = float(saved_range[0])
-                high = float(saved_range[1])
-            except Exception:
-                return (min_price, max_price)
-            low = max(min_price, min(max_price, low))
-            high = max(min_price, min(max_price, high))
-            if low > high:
-                return (min_price, max_price)
-            return (low, high)
-
-        def format_time_left(end_date_value, settings):
-            if not end_date_value:
-                return None
-            raw = str(end_date_value)
-            end_dt = None
-            try:
-                end_dt = datetime.fromisoformat(raw)
-            except Exception:
-                try:
-                    end_dt = datetime.strptime(raw, "%Y-%m-%d")
-                except Exception:
-                    end_dt = None
-            if not end_dt:
-                return None
-            if "T" not in raw:
-                end_dt = end_dt.replace(hour=23, minute=59, second=59)
-            end_dt = normalize_forum_datetime(end_dt)
-            now_dt = normalize_forum_datetime(get_now_for_settings(settings))
-            if end_dt <= now_dt:
-                return "Ended"
-            delta = end_dt - now_dt
-            days = delta.days
-            hours = int(delta.seconds // 3600)
-            minutes = int((delta.seconds % 3600) // 60)
-            if days > 0:
-                return f"Ends in {days}d {hours}h"
-            if hours > 0:
-                return f"Ends in {hours}h {minutes}m"
-            return f"Ends in {minutes}m"
-
-        def get_post_status(post):
-            status = post.get("status", "Active")
-            listing_type = post.get("listing_type")
-            if listing_type == "Auction":
-                _, _, end_date = get_auction_fields(post)
-                if end_date:
-                    try:
-                        if datetime.fromisoformat(end_date).date() < datetime.now().date() and status == "Active":
-                            return "Ended"
-                    except Exception:
-                        pass
-            return status
-
-        def open_streamlit_dialog(title):
-            dialog_fn = getattr(st, "dialog", None)
-            if callable(dialog_fn):
-                try:
-                    dialog_ctx = dialog_fn(title)
-                    if hasattr(dialog_ctx, "__enter__"):
-                        return dialog_ctx, True
-                except Exception:
-                    pass
-            return st.container(), False
-
-        def render_listing_edit_form(post, key_prefix):
-            post_id = post.get("id")
-            listing_type_value = post.get("listing_type") or "For Sale"
-            listing_type_options = ["For Sale", "Auction", "Discussion"]
-            try:
-                listing_type_index = listing_type_options.index(listing_type_value)
-            except ValueError:
-                listing_type_index = 0
-            category_filter = st.text_input(
-                "Filter categories (optional)",
-                placeholder="Type to filter categories (e.g., bullion, cards, coins)",
-                key=f"{key_prefix}_category_filter_{post_id}"
-            )
-            category_list = list(COMMUNITY_CATEGORY_OPTIONS)
-            category_list += [asset.get("type", "Other") for asset in portfolio]
-            category_value = post.get("category", "Other")
-            if category_value not in category_list:
-                category_list.append(category_value)
-            category_list = filter_category_options(category_list, category_filter)
-            if category_value not in category_list:
-                category_list.insert(0, category_value)
-            try:
-                category_index = category_list.index(category_value)
-            except ValueError:
-                category_index = 0
-
-            starting_bid_default, min_increment_default, end_date_default = get_auction_fields(post)
-            reserve_default = get_reserve_amount(post) if supports_reserve else None
-            buy_now_default = get_buy_now_price(post) if supports_buy_now else None
-            end_date_value = None
-            if end_date_default:
-                try:
-                    end_date_value = datetime.fromisoformat(str(end_date_default)).date()
-                except Exception:
-                    try:
-                        end_date_value = datetime.strptime(str(end_date_default), "%Y-%m-%d").date()
-                    except Exception:
-                        end_date_value = None
-            if end_date_value is None:
-                end_date_value = datetime.now().date() + timedelta(days=7)
-
-            with st.form(f"{key_prefix}_edit_listing_form_{post_id}"):
-                edit_listing_type = st.selectbox(
-                    "Listing Type",
-                    listing_type_options,
-                    index=listing_type_index,
-                    key=f"{key_prefix}_edit_listing_type_{post_id}"
-                )
-                edit_category = st.selectbox(
-                    "Category",
-                    category_list,
-                    index=category_index,
-                    key=f"{key_prefix}_edit_listing_category_{post_id}"
-                )
-                edit_title = st.text_input(
-                    "Title",
-                    value=post.get("title", ""),
-                    key=f"{key_prefix}_edit_listing_title_{post_id}"
-                )
-                edit_description = st.text_area(
-                    "Description",
-                    value=post.get("body", ""),
-                    height=120,
-                    key=f"{key_prefix}_edit_listing_body_{post_id}"
-                )
-                grading_type = grading_type_for_category(edit_category)
-                edit_grading_company = None
-                edit_grading_grade = None
-                if grading_type:
-                    st.markdown("#### Grading (optional)")
-                    if supports_grading:
-                        if grading_type == "coin":
-                            company_options = COIN_GRADING_COMPANIES
-                            grade_options = COIN_GRADE_OPTIONS
-                        else:
-                            company_options = CARD_GRADING_COMPANIES
-                            grade_options = CARD_GRADE_OPTIONS
-                        existing_company = post.get("grading_company") or "Ungraded / None"
-                        existing_grade = post.get("grading_grade") or "Ungraded"
-                        if existing_company not in (["Ungraded / None"] + company_options):
-                            company_options = [existing_company] + company_options
-                        if existing_grade not in grade_options:
-                            grade_options = [existing_grade] + grade_options
-                        edit_grading_company = st.selectbox(
-                            "Grading Company",
-                            ["Ungraded / None"] + company_options,
-                            index=(["Ungraded / None"] + company_options).index(existing_company),
-                            key=f"{key_prefix}_edit_listing_grade_company_{post_id}"
-                        )
-                        edit_grading_grade = st.selectbox(
-                            "Grade",
-                            grade_options,
-                            index=grade_options.index(existing_grade),
-                            key=f"{key_prefix}_edit_listing_grade_{post_id}"
-                        )
-                        if edit_grading_company == "Ungraded / None":
-                            edit_grading_company = None
-                        if edit_grading_grade == "Ungraded":
-                            edit_grading_grade = None
-                    else:
-                        st.caption("Grading fields require a schema update. Run the migration helper below.")
-                existing_images = post.get("images") or []
-                display_images = get_post_images(post)
-                if display_images:
-                    preview_cols = st.columns(min(len(display_images), 5))
-                    for idx, img in enumerate(display_images):
-                        with preview_cols[idx]:
-                            st.image(img, width=140)
-                replace_images = []
-                remove_images = False
-                if supports_images:
-                    replace_images = st.file_uploader(
-                        f"Replace Photos (max {MAX_LISTING_IMAGES})",
-                        type=["jpg", "jpeg", "png"],
-                        accept_multiple_files=True,
-                        key=f"{key_prefix}_edit_listing_images_{post_id}"
-                    )
-                    if replace_images:
-                        image_error = validate_listing_images(replace_images)
-                        if image_error:
-                            st.warning(image_error)
-                            replace_images = replace_images[:MAX_LISTING_IMAGES]
-                    remove_images = st.checkbox(
-                        "Remove existing photos",
-                        value=False,
-                        key=f"{key_prefix}_edit_listing_remove_images_{post_id}"
-                    )
-                else:
-                    st.caption("Photo uploads require a schema update. Run the migration helper below.")
-                edit_location = st.text_input(
-                    "Country (required)",
-                    value=post.get("location", ""),
-                    help="Enter the country where the item is located. Add city/region after the country if needed.",
-                    key=f"{key_prefix}_edit_listing_location_{post_id}"
-                )
-                edit_price = None
-                edit_starting_bid = None
-                edit_min_increment = None
-                edit_reserve = None
-                edit_buy_now = None
-                edit_end_date = None
-                listing_currency = post.get("currency", currency_code)
-                if edit_listing_type == "For Sale":
-                    edit_price = st.number_input(
-                        f"Price ({listing_currency})",
-                        min_value=0.0,
-                        value=float(post.get("price") or 0.0),
-                        step=1.0,
-                        key=f"{key_prefix}_edit_listing_price_{post_id}"
-                    )
-                elif edit_listing_type == "Auction":
-                    edit_starting_bid = st.number_input(
-                        f"Starting Bid ({listing_currency})",
-                        min_value=0.0,
-                        value=float(starting_bid_default or 0.0),
-                        step=1.0,
-                        key=f"{key_prefix}_edit_listing_starting_{post_id}"
-                    )
-                    edit_min_increment = st.number_input(
-                        f"Minimum Increment ({listing_currency})",
-                        min_value=0.0,
-                        value=float(min_increment_default or 0.0),
-                        step=1.0,
-                        key=f"{key_prefix}_edit_listing_increment_{post_id}"
-                    )
-                    if supports_reserve:
-                        edit_reserve = st.number_input(
-                            f"Reserve Amount ({listing_currency})",
-                            min_value=0.0,
-                            value=float(reserve_default or 0.0),
-                            step=1.0,
-                            key=f"{key_prefix}_edit_listing_reserve_{post_id}"
-                        )
-                    else:
-                        st.caption("Reserve amounts require a schema update. Run the migration helper.")
-                    if supports_buy_now:
-                        edit_buy_now = st.number_input(
-                            f"Buy Now Price ({listing_currency})",
-                            min_value=0.0,
-                            value=float(buy_now_default or 0.0),
-                            step=1.0,
-                            key=f"{key_prefix}_edit_listing_buy_now_{post_id}"
-                        )
-                    else:
-                        st.caption("Buy Now requires a schema update. Run the migration helper.")
-                    edit_end_date = st.date_input(
-                        "Auction End Date",
-                        value=end_date_value,
-                        key=f"{key_prefix}_edit_listing_end_date_{post_id}"
-                    )
-                submit_edit = st.form_submit_button("Save Changes")
-
-            if submit_edit:
-                if not edit_title.strip():
-                    st.error("Title is required.")
-                elif not edit_location.strip():
-                    st.error("Country is required.")
-                elif not edit_description.strip():
-                    st.error("Description is required.")
-                elif validate_community_text(f"{edit_title} {edit_description} {edit_location}"):
-                    st.error("Your listing contains content that violates the Community Rules.")
-                elif replace_images and validate_listing_images(replace_images):
-                    st.error(validate_listing_images(replace_images))
-                elif edit_listing_type == "Auction" and supports_reserve and edit_reserve and edit_starting_bid is not None and edit_reserve < edit_starting_bid:
-                    st.error("Reserve amount should be equal to or higher than the starting bid.")
-                elif edit_listing_type == "Auction" and supports_buy_now and edit_buy_now and edit_reserve and edit_buy_now < edit_reserve:
-                    st.error("Buy Now price should be equal to or higher than the reserve.")
-                else:
-                    update_images = None
-                    if supports_images and remove_images:
-                        update_images = []
-                    elif supports_images and replace_images:
-                        update_images = encode_uploaded_images(replace_images)
-                    update_payload = {
-                        "title": edit_title.strip(),
-                        "body": edit_description.strip(),
-                        "category": edit_category,
-                        "listing_type": edit_listing_type,
-                        "location": edit_location.strip(),
-                        "currency": listing_currency,
-                        "price": float(edit_price) if edit_listing_type == "For Sale" else None,
-                        "auction_starting_bid": float(edit_starting_bid) if edit_listing_type == "Auction" else None,
-                        "auction_min_increment": float(edit_min_increment) if edit_listing_type == "Auction" else None,
-                        "reserve_amount": float(edit_reserve) if edit_listing_type == "Auction" and supports_reserve and edit_reserve and edit_reserve > 0 else None,
-                        "buy_now_price": float(edit_buy_now) if edit_listing_type == "Auction" and supports_buy_now and edit_buy_now and edit_buy_now > 0 else None,
-                        "auction_end_date": edit_end_date.isoformat() if edit_listing_type == "Auction" and edit_end_date else None
-                    }
-                    if supports_grading:
-                        if grading_type:
-                            update_payload["grading_company"] = edit_grading_company
-                            update_payload["grading_grade"] = edit_grading_grade
-                        else:
-                            update_payload["grading_company"] = None
-                            update_payload["grading_grade"] = None
-                    if update_images is not None:
-                        update_payload["images"] = update_images
-                    if not supports_reserve:
-                        update_payload.pop("reserve_amount", None)
-                    if not supports_buy_now:
-                        update_payload.pop("buy_now_price", None)
-                    _, err = community_update_post(community_settings, db, post.get("id"), update_payload)
-                    if err:
-                        st.error(err)
-                    else:
-                        st.success("Listing updated.")
-                        st.session_state.edit_listing_id = None
-                        request_scroll_to_top()
-                        st.rerun()
-
-        def render_marketplace_card(post, status, key_prefix="card"):
-            post_id = post.get("id", "")
-            listing_type = post.get("listing_type", "Discussion")
-            currency = post.get("currency", currency_code)
-            title = escape_html(post.get("title", "Listing"))
-            category = escape_html(post.get("category", "Other"))
-            country = escape_html(post.get("location", ""))
-            seller = escape_html(post.get("created_by", "Seller"))
-            image_src = escape_html(get_listing_card_image(post))
-            is_new = is_recent_listing(post, days=7)
-            photo_count = len(get_post_images(post))
-
-            price_label = ""
-            price_value = post.get("price")
-            if listing_type == "For Sale" and price_value:
-                price_label = f"{currency} {float(price_value):,.2f}"
-            elif listing_type == "Auction":
-                starting_bid, _, _ = get_auction_fields(post)
-                if starting_bid:
-                    price_label = f"Starting {currency} {float(starting_bid):,.2f}"
-
-            time_left_label = ""
-            if listing_type == "Auction":
-                _, _, end_date = get_auction_fields(post)
-                time_left_label = format_time_left(end_date, user_settings) or ""
-
-            badges = [
-                f'<span class="market-pill gold">{escape_html(listing_type)}</span>',
-                f'<span class="market-pill">{escape_html(status)}</span>'
-            ]
-            if time_left_label:
-                badges.append(f'<span class="market-pill warning">{escape_html(time_left_label)}</span>')
-            if is_new:
-                badges.append('<span class="market-pill success">NEW</span>')
-            if photo_count:
-                badges.append(f'<span class="market-pill">Photos {photo_count}</span>')
-            if post.get("buy_now_price"):
-                badges.append('<span class="market-pill gold">Buy Now</span>')
-            badges_html = "".join(badges)
-
-            price_tag_html = f'<div class="market-price-tag">{price_label}</div>' if price_label else ''
-            card_html = (
-                '<div class="market-card">'
-                f'<div class="market-image"><img src="{image_src}" alt="Listing image" />{price_tag_html}</div>'
-                f'<div class="market-body"><div class="market-badges">{badges_html}</div>'
-                f'<div class="market-title">{title}</div>'
-                f'<div class="market-meta">{country} · {category} · @{seller}</div>'
-                '</div></div>'
-            )
-            render_html_block(card_html)
-            actions = st.columns([1, 1])
-            with actions[0]:
-                if st.button("View", key=f"{key_prefix}_view_listing_{post_id}"):
-                    st.session_state.market_selected_post_id = post_id
-                    request_scroll_to_top()
-                    st.rerun()
-            with actions[1]:
-                if user == post.get("created_by"):
-                    if st.button("Edit", key=f"{key_prefix}_edit_listing_card_{post_id}"):
-                        st.session_state.edit_listing_id = post_id
-                        st.session_state.edit_listing_origin = "browse"
-                        request_scroll_to_top()
-                        st.rerun()
-                else:
-                    watchlist = st.session_state.market_watchlist
-                    is_watching = post_id in watchlist
-                    label = "Watching" if is_watching else "Watch"
-                    if st.button(label, key=f"{key_prefix}_watch_listing_{post_id}"):
-                        if is_watching:
-                            watchlist.discard(post_id)
-                        else:
-                            watchlist.add(post_id)
-                        st.session_state.market_watchlist = watchlist
-                        persist_market_watchlist(db, user, watchlist)
-                        st.rerun()
-
-        def render_listing_detail_panel(post, status):
-            post_id = post.get("id", "")
-            price = post.get("price")
-            currency = post.get("currency", currency_code)
-            listing_type = post.get("listing_type", "Discussion")
-            title = post.get("title", "Listing")
-
-            header_cols = st.columns([3, 1])
-            with header_cols[0]:
-                st.markdown(f"### {title}")
-                st.caption(f"Posted by {post.get('created_by', 'Unknown')} • {post.get('created_at', '')}")
-            with header_cols[1]:
-                watchlist = st.session_state.market_watchlist
-                is_watching = post_id in watchlist
-                label = "Watching" if is_watching else "Watch"
-                if st.button(label, key=f"watch_listing_detail_{post_id}"):
-                    if is_watching:
-                        watchlist.discard(post_id)
-                    else:
-                        watchlist.add(post_id)
-                    st.session_state.market_watchlist = watchlist
-                    persist_market_watchlist(db, user, watchlist)
-                    st.rerun()
-
-            detail_cols = st.columns([1.3, 1])
-            with detail_cols[0]:
-                post_images = get_post_images(post)
-                if post_images:
-                    image_cols = st.columns(min(len(post_images), 3))
-                    for idx, img in enumerate(post_images[:3]):
-                        with image_cols[idx]:
-                            st.image(img, width=220)
-                st.write(post.get("body", ""))
-                if post.get("category"):
-                    st.write(f"Category: {post.get('category')}")
-                if post.get("grading_company") or post.get("grading_grade"):
-                    company = post.get("grading_company") or ""
-                    grade = post.get("grading_grade") or ""
-                    label = f"{company} {grade}".strip()
-                    st.write(f"Grade: {label}")
-                if post.get("location"):
-                    st.write(f"Country: {post.get('location')}")
-                if status == "Sold" and post.get("sold_price") is not None:
-                    st.markdown(f"**Sold for:** {currency} {float(post.get('sold_price')):,.2f}")
-
-            with detail_cols[1]:
-                summary_card = st.container()
-                with summary_card:
-                    st.markdown("#### Listing Summary")
-                    if listing_type == "For Sale":
-                        st.metric("Asking Price", f"{currency} {float(price or 0.0):,.2f}")
-                    elif listing_type == "Auction":
-                        starting_bid, min_increment, end_date = get_auction_fields(post)
-                        st.metric("Starting Bid", f"{currency} {float(starting_bid or 0.0):,.2f}")
-                        if end_date:
-                            st.caption(f"Auction ends: {end_date}")
-                    if post.get("buy_now_price"):
-                        st.metric("Buy Now", f"{currency} {float(post.get('buy_now_price')):,.2f}")
-                    if post.get("reserve_amount"):
-                        st.metric("Reserve", f"{currency} {float(post.get('reserve_amount')):,.2f}")
-                    if user == post.get("created_by"):
-                        if st.button("Edit Listing", key=f"edit_listing_detail_{post_id}"):
-                            st.session_state.edit_listing_id = post_id
-                            st.session_state.edit_listing_origin = "browse"
-                            request_scroll_to_top()
-                            st.rerun()
-
-            if listing_type == "Auction":
-                starting_bid, min_increment, end_date = get_auction_fields(post)
-                reserve_amount = get_reserve_amount(post) if supports_reserve else None
-                buy_now_price = get_buy_now_price(post) if supports_buy_now else None
-                bids, bid_err = community_get_bids(community_settings, db, post_id)
-                if bid_err:
-                    st.error(bid_err)
-                    bids = []
-                current_bid = max([b.get("amount", 0.0) for b in bids], default=starting_bid or 0.0)
-                st.markdown(f"**Current Bid:** {currency} {current_bid:,.2f}")
-                st.caption(f"Minimum Increment: {currency} {float(min_increment or 0.0):,.2f}")
-                if reserve_amount:
-                    st.caption(f"Reserve: {currency} {float(reserve_amount):,.2f}")
-                    if current_bid >= float(reserve_amount):
-                        st.success("Reserve met")
-                    else:
-                        st.warning("Reserve not met yet")
-                if buy_now_price:
-                    st.caption(f"Buy Now: {currency} {float(buy_now_price):,.2f}")
-                if end_date:
-                    st.write(f"Auction ends: {end_date}")
-
-                if bids:
-                    recent = sorted(bids, key=lambda b: parse_forum_date(b.get("created_at", "")), reverse=True)[:5]
-                    st.markdown("**Recent Bids**")
-                    for bid in recent:
-                        st.write(f"{bid.get('user','User')}: {currency} {float(bid.get('amount', 0.0)):,.2f}")
-
-                if status == "Active":
-                    if is_banned:
-                        st.info("You cannot bid while suspended.")
-                    else:
-                        with st.form(f"bid_form_{post_id}"):
-                            bid_amount = st.number_input(
-                                f"Place Bid ({currency})",
-                                min_value=0.0,
-                                value=float(current_bid + max(min_increment or 0.0, 1.0)),
-                                step=1.0
-                            )
-                            submit_bid = st.form_submit_button("Submit Bid")
-                        if submit_bid:
-                            if bid_amount < current_bid + (min_increment or 0.0):
-                                st.error(f"Bid must be at least {currency} {current_bid + (min_increment or 0.0):,.2f}.")
-                            else:
-                                bid_payload = {
-                                    "post_id": post_id,
-                                    "amount": float(bid_amount),
-                                    "user": user,
-                                    "created_at": datetime.now().isoformat()
-                                }
-                                if supabase_auth_required(community_settings) and supports_owner_id and auth_user_id:
-                                    bid_payload["owner_id"] = auth_user_id
-                                _, err = community_add_bid(community_settings, db, bid_payload)
-                                if err:
-                                    st.error(err)
-                                else:
-                                    seller = post.get("created_by")
-                                    if seller and seller != user:
-                                        recipient_id = community_lookup_user_auth_id(community_settings, seller) if supabase_auth_required(community_settings) else None
-                                        if supabase_auth_required(community_settings) and not recipient_id:
-                                            st.warning("Bid placed, but seller has not linked a Community account yet.")
-                                        else:
-                                            msg_payload = {
-                                                "sender": user,
-                                                "recipient": seller,
-                                                "subject": f"New bid on {post.get('title', 'your listing')}",
-                                                "body": f"{user} placed a bid of {currency} {float(bid_amount):,.2f}.",
-                                                "created_at": datetime.now().isoformat(),
-                                                "read_at": None
-                                            }
-                                            if supabase_auth_required(community_settings) and auth_user_id:
-                                                msg_payload["sender_id"] = auth_user_id
-                                                msg_payload["recipient_id"] = recipient_id
-                                            _, msg_err = community_send_message(community_settings, db, msg_payload)
-                                            if msg_err:
-                                                st.warning(f"Bid placed, but could not notify seller: {msg_err}")
-                                    st.success("Bid submitted.")
-                                    st.rerun()
-
-                    if buy_now_price and user != post.get("created_by"):
-                        if st.button("Buy Now", key=f"buy_now_{post_id}"):
-                            _, err = community_update_post(community_settings, db, post_id, {
-                                "status": "Sold",
-                                "sold_price": float(buy_now_price),
-                                "sold_at": datetime.now().isoformat()
-                            })
-                            if err:
-                                st.error(err)
-                            else:
-                                seller = post.get("created_by")
-                                if seller and seller != user:
-                                    recipient_id = community_lookup_user_auth_id(community_settings, seller) if supabase_auth_required(community_settings) else None
-                                    if supabase_auth_required(community_settings) and not recipient_id:
-                                        st.warning("Purchase completed, but seller has not linked a Community account yet.")
-                                    else:
-                                        msg_payload = {
-                                            "sender": user,
-                                            "recipient": seller,
-                                            "subject": f"Buy Now purchase on {post.get('title', 'your listing')}",
-                                            "body": f"{user} purchased via Buy Now for {currency} {float(buy_now_price):,.2f}.",
-                                            "created_at": datetime.now().isoformat(),
-                                            "read_at": None
-                                        }
-                                        if supabase_auth_required(community_settings) and auth_user_id:
-                                            msg_payload["sender_id"] = auth_user_id
-                                            msg_payload["recipient_id"] = recipient_id
-                                        community_send_message(community_settings, db, msg_payload)
-                                st.success("Purchase completed.")
-                                st.rerun()
-
-            if listing_type == "For Sale":
-                st.markdown(f"**Asking Price:** {currency} {float(price or 0.0):,.2f}")
-                offers, offer_err = community_get_offers(community_settings, db, post_id)
-                if offer_err:
-                    st.error(offer_err)
-                if status == "Active":
-                    if is_banned:
-                        st.info("You cannot send offers while suspended.")
-                    else:
-                        with st.form(f"offer_form_{post_id}"):
-                            offer_amount = st.number_input(
-                                f"Send Offer ({currency})",
-                                min_value=0.0,
-                                value=float(price or 0.0),
-                                step=1.0
-                            )
-                            submit_offer = st.form_submit_button("Send Offer")
-                        if submit_offer:
-                            offer_payload = {
-                                "post_id": post_id,
-                                "amount": float(offer_amount),
-                                "user": user,
-                                "created_at": datetime.now().isoformat()
-                            }
-                            if supabase_auth_required(community_settings) and supports_owner_id and auth_user_id:
-                                offer_payload["owner_id"] = auth_user_id
-                            _, err = community_add_offer(community_settings, db, offer_payload)
-                            if err:
-                                st.error(err)
-                            else:
-                                st.success("Offer sent.")
-                                st.rerun()
-
-            comments, comment_err = community_get_comments(community_settings, db, post_id)
-            if comment_err:
-                st.error(comment_err)
-                comments = []
-            st.markdown("**Comments**")
-            for comment in comments[-5:]:
-                st.write(f"{comment.get('user', 'User')}: {comment.get('text', '')}")
-            if is_banned:
-                st.info("You cannot comment while suspended.")
+            if community_ready:
+                role = community_get_role(community_settings, db, user)
+                is_mod = role in ("admin", "moderator")
+                is_banned = community_is_banned(community_settings, db, user)
             else:
-                with st.form(f"comment_form_{post_id}"):
-                    comment_text = st.text_input("Add a comment", key=f"comment_input_{post_id}")
-                    submit_comment = st.form_submit_button("Post Comment")
-                if submit_comment and comment_text.strip():
-                    if validate_community_text(comment_text):
-                        st.error("Your comment violates the Community Rules.")
-                    else:
-                        comment_payload = {
-                            "post_id": post_id,
-                            "user": user,
-                            "text": comment_text.strip(),
-                            "created_at": datetime.now().isoformat()
-                        }
-                        if supabase_auth_required(community_settings) and supports_owner_id and auth_user_id:
-                            comment_payload["owner_id"] = auth_user_id
-                        _, err = community_add_comment(community_settings, db, comment_payload)
-                        if err:
-                            st.error(err)
-                        else:
-                            st.success("Comment posted.")
-                            st.rerun()
+                role = None
+                is_mod = False
+                is_banned = False
 
-            if user != post.get("created_by"):
-                if is_banned:
-                    st.info("You cannot message sellers while suspended.")
-                else:
-                    with st.form(f"message_seller_{post_id}"):
-                        message_body = st.text_area("Message seller", height=80, key=f"msg_body_{post_id}")
-                        send_msg = st.form_submit_button("Send Message")
-                    if send_msg and message_body.strip():
-                        if validate_community_text(message_body):
-                            st.error("Your message violates the Community Rules.")
-                        else:
-                            recipient_name = post.get("created_by")
-                            recipient_id = community_lookup_user_auth_id(community_settings, recipient_name) if supabase_auth_required(community_settings) else None
-                            if supabase_auth_required(community_settings) and not recipient_id:
-                                st.error("Seller has not linked a Community account yet.")
-                            else:
-                                msg_payload = {
-                                    "sender": user,
-                                    "recipient": recipient_name,
-                                    "subject": f"Re: {post.get('title', '')}",
-                                    "body": message_body.strip(),
-                                    "created_at": datetime.now().isoformat(),
-                                    "read_at": None
-                                }
-                                if supabase_auth_required(community_settings) and auth_user_id:
-                                    msg_payload["sender_id"] = auth_user_id
-                                    msg_payload["recipient_id"] = recipient_id
-                                _, err = community_send_message(community_settings, db, msg_payload)
-                                if err:
-                                    st.error(err)
-                                else:
-                                    st.success("Message sent.")
-                                    st.rerun()
+            column_support = st.session_state.get("community_column_support")
+            if supabase_enabled(community_settings) and community_ready and column_support is None:
+                column_results = supabase_check_columns(
+                    community_settings,
+                    "community_posts",
+                    list(COMMUNITY_POSTS_EXTRA_COLUMNS.keys()),
+                    use_service_key=community_use_service_role(community_settings),
+                    auth_token=community_auth_token(community_settings)
+                )
+                column_support = {col: ok for col, ok, _ in column_results}
+                st.session_state.community_column_support = column_support
+            if column_support is None:
+                column_support = {}
+            supports_reserve = column_support.get("reserve_amount", True) or not supabase_enabled(community_settings)
+            supports_buy_now = column_support.get("buy_now_price", True) or not supabase_enabled(community_settings)
+            supports_images = column_support.get("images", True) or not supabase_enabled(community_settings)
+            supports_owner_id = column_support.get("owner_id", True) or not supabase_enabled(community_settings)
+            supports_grading_company = column_support.get("grading_company", True) or not supabase_enabled(community_settings)
+            supports_grading_grade = column_support.get("grading_grade", True) or not supabase_enabled(community_settings)
+            supports_grading = supports_grading_company and supports_grading_grade
+            if supabase_auth_required(community_settings) and not supports_owner_id:
+                st.warning("Supabase schema is missing the owner_id column. Run the migration helper before using Community Auth.")
 
-            report_cols = st.columns(2)
-            with report_cols[0]:
-                if st.button("Report Listing", key=f"report_{post_id}"):
-                    report_payload = {
-                        "id": secrets.token_hex(6),
-                        "post_id": post_id,
-                        "reported_by": user,
-                        "reported_user": post.get("created_by"),
-                        "reason": "User reported",
-                        "created_at": datetime.now().isoformat()
-                    }
-                    if supabase_auth_required(community_settings) and supports_owner_id and auth_user_id:
-                        report_payload["owner_id"] = auth_user_id
-                    if supabase_enabled(community_settings):
-                        report_payload.pop("id", None)
-                    _, err = community_report_post(community_settings, db, report_payload)
-                    if err:
-                        st.error(err)
-                    else:
-                        st.success("Report submitted.")
-                        st.rerun()
-            if is_mod:
-                with report_cols[1]:
-                    if st.button("Remove Listing", key=f"remove_{post_id}"):
-                        _, err = community_update_post(community_settings, db, post_id, {"status": "Removed"})
-                        if err:
-                            st.error(err)
-                        else:
-                            st.success("Listing removed.")
-                            st.rerun()
-
-        def render_listing_edit_modal():
-            post_id = st.session_state.get("edit_listing_id")
-            if not post_id:
-                return
-            target_post = next((post for post in forum_posts if post.get("id") == post_id), None)
-            if not target_post:
+            if "edit_listing_id" not in st.session_state:
                 st.session_state.edit_listing_id = None
-                return
-            dialog_ctx, dialog_supported = open_streamlit_dialog("Edit Listing")
-            if dialog_supported:
-                with dialog_ctx:
-                    render_listing_edit_form(target_post, f"modal_{st.session_state.get('edit_listing_origin', 'browse')}")
-                    if st.button("Close", key=f"close_edit_listing_{post_id}"):
-                        st.session_state.edit_listing_id = None
-                        st.rerun()
+            if "edit_listing_origin" not in st.session_state:
+                st.session_state.edit_listing_origin = "browse"
+            if "market_selected_post_id" not in st.session_state:
+                st.session_state.market_selected_post_id = None
+            if "market_watchlist" not in st.session_state:
+                stored_watchlist = user_settings.get("market_watchlist") or []
+                st.session_state.market_watchlist = set(stored_watchlist)
+            if "market_saved_searches" not in st.session_state:
+                st.session_state.market_saved_searches = user_settings.get("market_saved_searches") or []
+
+            if is_banned:
+                st.warning("Your account is suspended from posting, bidding, or messaging in the community.")
             else:
+                st.info("Community Rules apply to listings, comments, and messages. Violations are blocked.")
+
+            forum_tabs = ["Browse", "Watchlist", "Create Listing", "My Listings", "Messages"]
+            if is_mod:
+                forum_tabs.append("Moderation")
+            forum_tabs = st.tabs(forum_tabs)
+
+            def normalize_forum_datetime(dt_value):
+                if not isinstance(dt_value, datetime):
+                    return dt_value
+                if dt_value.tzinfo is not None:
+                    try:
+                        dt_value = dt_value.astimezone().replace(tzinfo=None)
+                    except Exception:
+                        dt_value = dt_value.replace(tzinfo=None)
+                return dt_value
+
+            def parse_forum_date(value):
+                if not value:
+                    return datetime.min
+                try:
+                    parsed = datetime.fromisoformat(value)
+                except Exception:
+                    return datetime.min
+                return normalize_forum_datetime(parsed)
+
+            def forum_now():
+                now_dt = get_now_for_settings(user_settings)
+                return normalize_forum_datetime(now_dt)
+
+            def is_recent_listing(post, days=7):
+                created_at = post.get("created_at")
+                created_dt = parse_forum_date(created_at)
+                if created_dt == datetime.min:
+                    return False
+                return (forum_now() - created_dt).days <= days
+
+            def get_auction_fields(post):
+                if post.get("auction"):
+                    auction = post.get("auction", {})
+                    return (
+                        auction.get("starting_bid", 0.0),
+                        auction.get("min_increment", 0.0),
+                        auction.get("end_date")
+                    )
+                return (
+                    post.get("auction_starting_bid", 0.0),
+                    post.get("auction_min_increment", 0.0),
+                    post.get("auction_end_date")
+                )
+
+            def get_reserve_amount(post):
+                if post.get("auction"):
+                    return post.get("auction", {}).get("reserve_amount")
+                return post.get("reserve_amount")
+
+            def get_buy_now_price(post):
+                if post.get("auction"):
+                    return post.get("auction", {}).get("buy_now_price")
+                return post.get("buy_now_price")
+
+            def get_post_images(post):
+                images = post.get("images") or []
+                display = []
+                for img in images:
+                    if isinstance(img, dict) and img.get("data"):
+                        mime = img.get("mime") or "image/png"
+                        display.append(f"data:{mime};base64,{img.get('data')}")
+                    elif isinstance(img, str):
+                        display.append(img)
+                return display[:5]
+
+            def get_listing_card_image(post):
+                images = get_post_images(post)
+                if images:
+                    return images[0]
+                title = post.get("title") or post.get("category") or "listing"
+                return search_asset_image(str(title))
+
+            def get_listing_price_value(post):
+                listing_type = post.get("listing_type", "Discussion")
+                if listing_type == "For Sale":
+                    return post.get("price")
+                if listing_type == "Auction":
+                    starting_bid, _, _ = get_auction_fields(post)
+                    return starting_bid or post.get("price")
+                return None
+
+            def get_auction_end_dt(post):
+                _, _, end_date = get_auction_fields(post)
+                if not end_date:
+                    return None
+                raw = str(end_date)
+                try:
+                    end_dt = datetime.fromisoformat(raw)
+                except Exception:
+                    try:
+                        end_dt = datetime.strptime(raw, "%Y-%m-%d")
+                    except Exception:
+                        return None
+                if "T" not in raw:
+                    end_dt = end_dt.replace(hour=23, minute=59, second=59)
+                return normalize_forum_datetime(end_dt)
+
+            def clamp_price_range(saved_range, min_price, max_price):
+                if not saved_range or len(saved_range) != 2:
+                    return (min_price, max_price)
+                try:
+                    low = float(saved_range[0])
+                    high = float(saved_range[1])
+                except Exception:
+                    return (min_price, max_price)
+                low = max(min_price, min(max_price, low))
+                high = max(min_price, min(max_price, high))
+                if low > high:
+                    return (min_price, max_price)
+                return (low, high)
+
+            def format_time_left(end_date_value, settings):
+                if not end_date_value:
+                    return None
+                raw = str(end_date_value)
+                end_dt = None
+                try:
+                    end_dt = datetime.fromisoformat(raw)
+                except Exception:
+                    try:
+                        end_dt = datetime.strptime(raw, "%Y-%m-%d")
+                    except Exception:
+                        end_dt = None
+                if not end_dt:
+                    return None
+                if "T" not in raw:
+                    end_dt = end_dt.replace(hour=23, minute=59, second=59)
+                end_dt = normalize_forum_datetime(end_dt)
+                now_dt = normalize_forum_datetime(get_now_for_settings(settings))
+                if end_dt <= now_dt:
+                    return "Ended"
+                delta = end_dt - now_dt
+                days = delta.days
+                hours = int(delta.seconds // 3600)
+                minutes = int((delta.seconds % 3600) // 60)
+                if days > 0:
+                    return f"Ends in {days}d {hours}h"
+                if hours > 0:
+                    return f"Ends in {hours}h {minutes}m"
+                return f"Ends in {minutes}m"
+
+            def get_post_status(post):
+                status = post.get("status", "Active")
+                listing_type = post.get("listing_type")
+                if listing_type == "Auction":
+                    _, _, end_date = get_auction_fields(post)
+                    if end_date:
+                        try:
+                            if datetime.fromisoformat(end_date).date() < datetime.now().date() and status == "Active":
+                                return "Ended"
+                        except Exception:
+                            pass
+                return status
+
+            def open_streamlit_dialog(title):
                 dialog_fn = getattr(st, "dialog", None)
                 if callable(dialog_fn):
-                    @dialog_fn("Edit Listing")
-                    def _edit_dialog():
-                        render_listing_edit_form(
-                            target_post,
-                            f"modal_{st.session_state.get('edit_listing_origin', 'browse')}"
-                        )
-                        if st.button("Close", key=f"close_edit_listing_{post_id}"):
-                            st.session_state.edit_listing_id = None
-                            st.rerun()
-                    _edit_dialog()
-                else:
-                    st.markdown("### Edit Listing")
-                    st.caption("Your Streamlit version does not support modal dialogs. Showing the editor inline.")
-                    render_listing_edit_form(
-                        target_post,
-                        f"modal_{st.session_state.get('edit_listing_origin', 'browse')}"
-                    )
-                    if st.button("Close", key=f"close_edit_listing_{post_id}"):
-                        st.session_state.edit_listing_id = None
-                        st.rerun()
-                    st.stop()
+                    try:
+                        dialog_ctx = dialog_fn(title)
+                        if hasattr(dialog_ctx, "__enter__"):
+                            return dialog_ctx, True
+                    except Exception:
+                        pass
+                return st.container(), False
 
-        render_listing_edit_modal()
-
-        with forum_tabs[0]:
-            if not community_ready:
-                st.info("Community is not ready yet. Configure Supabase in the setup section at the bottom of this page.")
-            else:
-                if AUTOREFRESH_AVAILABLE:
-                    live_updates = st.checkbox("Live updates (auto-refresh bids)", value=True, key="community_live_updates")
-                    if live_updates:
-                        st_autorefresh(interval=20000, key="community_live_refresh")
-                st.markdown("### Browse Listings")
-                category_seed = set(COMMUNITY_CATEGORY_OPTIONS)
-                category_seed |= {post.get("category", "Other") for post in forum_posts}
-                category_seed |= {asset.get("type", "Other") for asset in portfolio}
-                category_options = list(COMMUNITY_CATEGORY_OPTIONS)
-                for extra in sorted(category_seed - set(category_options)):
-                    category_options.append(extra)
-                category_counts = Counter([post.get("category", "Other") for post in forum_posts])
-                top_categories = [cat for cat, _ in category_counts.most_common(6)]
-                quick_categories = ["All"] + [cat for cat in top_categories if cat in category_options]
-                quick_current = st.session_state.get("market_quick_category", "All")
-                quick_index = quick_categories.index(quick_current) if quick_current in quick_categories else 0
-                st.radio(
-                    "Quick Categories",
-                    quick_categories,
-                    horizontal=True,
-                    index=quick_index,
-                    key="market_quick_category"
-                )
-                filter_container = st.container()
-                with filter_container:
-                    st.markdown('<div id="sticky-filter-marker"></div>', unsafe_allow_html=True)
-                    filter_cols = st.columns([1.6, 1, 1, 1])
-                    with filter_cols[0]:
-                        search_term = st.text_input(
-                            "Search listings",
-                            placeholder="Search by title, description, or seller...",
-                            key="market_search_term"
-                        )
-                    with filter_cols[1]:
-                        type_filter = st.selectbox(
-                            "Type",
-                            ["All", "For Sale", "Auction", "Discussion"],
-                            key="market_type_filter"
-                        )
-                    with filter_cols[2]:
-                        category_filter = st.selectbox(
-                            "Category",
-                            ["All"] + category_options,
-                            key="market_category_filter"
-                        )
-                    with filter_cols[3]:
-                        status_filter = st.selectbox(
-                            "Status",
-                            ["All", "Active", "Ended", "Closed", "Sold", "Removed"],
-                            key="market_status_filter"
-                        )
-
-                    if "market_price_range_pending" in st.session_state:
-                        st.session_state.market_price_range = st.session_state.pop("market_price_range_pending")
-                    price_values = [value for value in (get_listing_price_value(post) for post in forum_posts) if value is not None]
-                    price_range = None
-                    sort_cols = st.columns([2, 1])
-                    with sort_cols[0]:
-                        if price_values:
-                            min_price = float(min(price_values))
-                            max_price = float(max(price_values))
-                            if "market_price_range" in st.session_state:
-                                st.session_state.market_price_range = clamp_price_range(
-                                    st.session_state.market_price_range, min_price, max_price
-                                )
-                            if min_price == max_price:
-                                st.caption(f"Price range fixed at {currency_code} {min_price:,.2f}")
-                                price_range = (min_price, max_price)
-                            else:
-                                if "market_price_range" in st.session_state:
-                                    price_range = st.slider(
-                                        f"Price Range ({currency_code})",
-                                        min_value=min_price,
-                                        max_value=max_price,
-                                        key="market_price_range"
-                                    )
-                                else:
-                                    price_range = st.slider(
-                                        f"Price Range ({currency_code})",
-                                        min_value=min_price,
-                                        max_value=max_price,
-                                        value=(min_price, max_price),
-                                        key="market_price_range"
-                                    )
-                    with sort_cols[1]:
-                        sort_option = st.selectbox(
-                            "Sort by",
-                            ["Newest", "Ending Soon", "Price (Low to High)", "Price (High to Low)"],
-                            key="market_sort_option"
-                        )
-
-                components.html(
-                    """
-                    <script>
-                      (function() {
-                        const marker = window.parent.document.getElementById("sticky-filter-marker");
-                        if (!marker) return;
-                        const block = marker.closest('div[data-testid="stVerticalBlock"]');
-                        if (block) {
-                          block.classList.add("sticky-filter-block");
-                        }
-                      })();
-                    </script>
-                    """,
-                    height=0
-                )
-
-                quick_filter_cols = st.columns(6)
-                with quick_filter_cols[0]:
-                    filter_watchlist = st.checkbox("Watchlist", key="market_filter_watchlist")
-                with quick_filter_cols[1]:
-                    filter_photos = st.checkbox("Photos only", key="market_filter_photos")
-                with quick_filter_cols[2]:
-                    filter_buy_now = st.checkbox("Buy Now", key="market_filter_buy_now")
-                with quick_filter_cols[3]:
-                    filter_new = st.checkbox("New (7d)", key="market_filter_new")
-                with quick_filter_cols[4]:
-                    filter_ending = st.checkbox("Ending Soon", key="market_filter_ending")
-                with quick_filter_cols[5]:
-                    filter_near_me = st.checkbox("Near Me", key="market_filter_near_me")
-
-                with st.expander("Saved Searches"):
-                    saved_searches = st.session_state.market_saved_searches
-                    saved_names = [s.get("name") for s in saved_searches if s.get("name")]
-                    selected_saved = st.selectbox(
-                        "Select saved search",
-                        ["Select..."] + saved_names,
-                        key="market_saved_search_select"
-                    )
-                    save_name = st.text_input("Save current search as", key="market_save_search_name")
-                    save_cols = st.columns(3)
-                    with save_cols[0]:
-                        if st.button("Save Search", key="market_save_search_btn"):
-                            if not save_name.strip():
-                                st.error("Please enter a name for this search.")
-                            else:
-                                payload = {
-                                    "name": save_name.strip(),
-                                    "search_term": search_term,
-                                    "type_filter": type_filter,
-                                    "category_filter": category_filter,
-                                    "status_filter": status_filter,
-                                    "sort_option": sort_option,
-                                    "quick_category": st.session_state.get("market_quick_category", "All"),
-                                    "price_range": list(price_range) if price_range else None,
-                                    "filter_watchlist": filter_watchlist,
-                                    "filter_photos": filter_photos,
-                                    "filter_buy_now": filter_buy_now,
-                                    "filter_new": filter_new,
-                                    "filter_ending": filter_ending,
-                                    "filter_near_me": filter_near_me,
-                                    "saved_at": datetime.now().isoformat()
-                                }
-                                saved_searches = [s for s in saved_searches if s.get("name") != payload["name"]]
-                                saved_searches.insert(0, payload)
-                                st.session_state.market_saved_searches = saved_searches
-                                persist_market_saved_searches(db, user, saved_searches)
-                                st.success("Search saved.")
-                    with save_cols[1]:
-                        if st.button("Load Search", key="market_load_search_btn"):
-                            if selected_saved and selected_saved != "Select...":
-                                search = next((s for s in saved_searches if s.get("name") == selected_saved), None)
-                                if search:
-                                    st.session_state.market_search_term = search.get("search_term", "")
-                                    st.session_state.market_type_filter = search.get("type_filter", "All")
-                                    st.session_state.market_category_filter = search.get("category_filter", "All")
-                                    st.session_state.market_status_filter = search.get("status_filter", "All")
-                                    st.session_state.market_sort_option = search.get("sort_option", "Newest")
-                                    st.session_state.market_quick_category = search.get("quick_category", "All")
-                                    st.session_state.market_filter_watchlist = bool(search.get("filter_watchlist", False))
-                                    st.session_state.market_filter_photos = bool(search.get("filter_photos", False))
-                                    st.session_state.market_filter_buy_now = bool(search.get("filter_buy_now", False))
-                                    st.session_state.market_filter_new = bool(search.get("filter_new", False))
-                                    st.session_state.market_filter_ending = bool(search.get("filter_ending", False))
-                                    st.session_state.market_filter_near_me = bool(search.get("filter_near_me", False))
-                                    if price_values and search.get("price_range"):
-                                        min_price = float(min(price_values))
-                                        max_price = float(max(price_values))
-                                        st.session_state.market_price_range_pending = clamp_price_range(
-                                            search.get("price_range"), min_price, max_price
-                                        )
-                                    st.rerun()
-                    with save_cols[2]:
-                        if st.button("Delete Search", key="market_delete_search_btn"):
-                            if selected_saved and selected_saved != "Select...":
-                                saved_searches = [s for s in saved_searches if s.get("name") != selected_saved]
-                                st.session_state.market_saved_searches = saved_searches
-                                persist_market_saved_searches(db, user, saved_searches)
-                                st.success("Search deleted.")
-                                st.rerun()
-
-                    if selected_saved and selected_saved != "Select...":
-                        search = next((s for s in saved_searches if s.get("name") == selected_saved), None)
-                        if search:
-                            alerts_enabled = st.checkbox(
-                                "Enable alerts for this search",
-                                value=bool(search.get("alerts_enabled", True)),
-                                key="market_saved_search_alerts_enabled"
-                            )
-                            email_enabled = st.checkbox(
-                                "Email alerts for this search",
-                                value=bool(search.get("email_alerts", False)),
-                                key="market_saved_search_email_enabled"
-                            )
-                            if (
-                                alerts_enabled != bool(search.get("alerts_enabled", True))
-                                or email_enabled != bool(search.get("email_alerts", False))
-                            ):
-                                search["alerts_enabled"] = alerts_enabled
-                                search["email_alerts"] = email_enabled
-                                persist_market_saved_searches(db, user, saved_searches)
-                            last_checked = search.get("last_checked", "Never")
-                            last_alerted = search.get("last_alerted", "Never")
-                            st.caption(f"Last checked: {last_checked} • Last alert: {last_alerted}")
-
-                def apply_saved_search_filters(posts, search_state):
-                    s_term = (search_state.get("search_term") or "").strip().lower()
-                    s_type = search_state.get("type_filter", "All")
-                    s_category = search_state.get("category_filter", "All")
-                    s_status = search_state.get("status_filter", "All")
-                    s_sort = search_state.get("sort_option", "Newest")
-                    s_quick = search_state.get("quick_category", "All")
-                    s_price = search_state.get("price_range")
-                    s_watch = bool(search_state.get("filter_watchlist"))
-                    s_photos = bool(search_state.get("filter_photos"))
-                    s_buy_now = bool(search_state.get("filter_buy_now"))
-                    s_new = bool(search_state.get("filter_new"))
-                    s_ending = bool(search_state.get("filter_ending"))
-                    s_near = bool(search_state.get("filter_near_me"))
-
-                    if s_quick and s_quick != "All":
-                        s_category = s_quick
-
-                    results = []
-                    for post in posts:
-                        status = get_post_status(post)
-                        if s_type != "All" and post.get("listing_type") != s_type:
-                            continue
-                        if s_category != "All" and post.get("category") != s_category:
-                            continue
-                        if s_status != "All" and status != s_status:
-                            continue
-                        if s_term:
-                            hay = f"{post.get('title','')} {post.get('body','')} {post.get('created_by','')}".lower()
-                            if s_term not in hay:
-                                continue
-                        if s_price:
-                            price_value = get_listing_price_value(post)
-                            if price_value is None:
-                                continue
-                            if price_value < s_price[0] or price_value > s_price[1]:
-                                continue
-                        if s_watch and post.get("id") not in st.session_state.market_watchlist:
-                            continue
-                        if s_photos and not get_post_images(post):
-                            continue
-                        if s_buy_now and not post.get("buy_now_price"):
-                            continue
-                        if s_new and not is_recent_listing(post, days=7):
-                            continue
-                        if s_ending:
-                            end_dt = get_auction_end_dt(post)
-                            if not end_dt:
-                                continue
-                            if end_dt > forum_now() + timedelta(days=2):
-                                continue
-                        if s_near:
-                            user_country = get_country_name(get_country_code(user_settings)).lower()
-                            post_country = str(post.get("location", "")).lower()
-                            if user_country and user_country not in post_country:
-                                continue
-                        results.append((status, post))
-
-                    if s_sort == "Ending Soon":
-                        results.sort(key=lambda pair: get_auction_end_dt(pair[1]) or datetime.max)
-                    elif s_sort == "Price (Low to High)":
-                        results.sort(key=lambda pair: get_listing_price_value(pair[1]) if get_listing_price_value(pair[1]) is not None else float("inf"))
-                    elif s_sort == "Price (High to Low)":
-                        results.sort(key=lambda pair: get_listing_price_value(pair[1]) if get_listing_price_value(pair[1]) is not None else -1, reverse=True)
-                    else:
-                        results.sort(key=lambda pair: parse_forum_date(pair[1].get("created_at", "")), reverse=True)
-                    return results
-
-                def run_saved_search_alerts():
-                    alerts = []
-                    updated = False
-                    saved_searches = st.session_state.market_saved_searches
-                    if not saved_searches:
-                        return alerts, updated
-                    now_iso = datetime.now().isoformat()
-                    for search in saved_searches:
-                        if not search.get("alerts_enabled", True):
-                            continue
-                        results = apply_saved_search_filters(forum_posts, search)
-                        result_ids = [post.get("id") for _, post in results if post.get("id")]
-                        last_ids = set(search.get("last_result_ids") or [])
-                        new_ids = [pid for pid in result_ids if pid not in last_ids]
-                        search["last_result_ids"] = result_ids[:200]
-                        search["last_checked"] = now_iso
-                        updated = True
-                        if new_ids:
-                            alerts.append({
-                                "name": search.get("name"),
-                                "count": len(new_ids),
-                                "sample": results[:3]
-                            })
-                            search["last_alerted"] = now_iso
-                            if user_settings.get("market_alerts_email_enabled") and search.get("email_alerts"):
-                                subject = f"WealthPulse Alert: {search.get('name')} ({len(new_ids)} new)"
-                                listing_lines = []
-                                for _, post in results[:5]:
-                                    listing_lines.append(f"- {post.get('title')} ({post.get('listing_type')})")
-                                body = "New listings matched your saved search:\n" + "\n".join(listing_lines)
-                                send_alert_email(user_settings, subject, body)
-                    if updated:
-                        st.session_state.market_saved_searches = saved_searches
-                        persist_market_saved_searches(db, user, saved_searches)
-                    return alerts, updated
-
-                quick_category = st.session_state.get("market_quick_category", "All")
-                if quick_category != "All":
-                    category_filter = quick_category
-
-                filtered = []
-                for post in forum_posts:
-                    status = get_post_status(post)
-                    if type_filter != "All" and post.get("listing_type") != type_filter:
-                        continue
-                    if category_filter != "All" and post.get("category") != category_filter:
-                        continue
-                    if status_filter != "All" and status != status_filter:
-                        continue
-                    if search_term:
-                        hay = f"{post.get('title','')} {post.get('body','')} {post.get('created_by','')}".lower()
-                        if search_term.lower() not in hay:
-                            continue
-                    if price_range:
-                        price_value = get_listing_price_value(post)
-                        if price_value is None:
-                            continue
-                        if price_value < price_range[0] or price_value > price_range[1]:
-                            continue
-                    if filter_watchlist and post.get("id") not in st.session_state.market_watchlist:
-                        continue
-                    if filter_photos and not get_post_images(post):
-                        continue
-                    if filter_buy_now and not post.get("buy_now_price"):
-                        continue
-                    if filter_new and not is_recent_listing(post, days=7):
-                        continue
-                    if filter_ending:
-                        end_dt = get_auction_end_dt(post)
-                        if not end_dt:
-                            continue
-                        if end_dt > forum_now() + timedelta(days=2):
-                            continue
-                    if filter_near_me:
-                        user_country = get_country_name(get_country_code(user_settings)).lower()
-                        post_country = str(post.get("location", "")).lower()
-                        if user_country and user_country not in post_country:
-                            continue
-                    filtered.append((status, post))
-
-                if sort_option == "Ending Soon":
-                    filtered.sort(
-                        key=lambda pair: get_auction_end_dt(pair[1]) or datetime.max
-                    )
-                elif sort_option == "Price (Low to High)":
-                    filtered.sort(
-                        key=lambda pair: get_listing_price_value(pair[1]) if get_listing_price_value(pair[1]) is not None else float("inf")
-                    )
-                elif sort_option == "Price (High to Low)":
-                    filtered.sort(
-                        key=lambda pair: get_listing_price_value(pair[1]) if get_listing_price_value(pair[1]) is not None else -1,
-                        reverse=True
-                    )
-                else:
-                    filtered.sort(key=lambda pair: parse_forum_date(pair[1].get("created_at", "")), reverse=True)
-
-                alerts_enabled = bool(user_settings.get("market_alerts_enabled", True))
-                alert_interval = int(user_settings.get("market_alerts_interval", 180))
-                if alerts_enabled:
-                    last_check = st.session_state.get("market_alerts_last_check", 0.0)
-                    if time.time() - last_check >= alert_interval:
-                        alert_results, _ = run_saved_search_alerts()
-                        st.session_state.market_alerts_last_check = time.time()
-                    else:
-                        alert_results = []
-                    if alert_results:
-                        st.markdown("#### Saved Search Alerts")
-                        for alert in alert_results:
-                            st.info(f"{alert['name']}: {alert['count']} new listing(s) matched.")
-                        if user_settings.get("market_alerts_push_enabled"):
-                            signature = build_alert_signature(alert_results)
-                            if signature and signature != st.session_state.get("market_alerts_last_push_signature"):
-                                st.session_state.market_alerts_last_push_signature = signature
-                                trigger_browser_notifications(alert_results)
-
-                if not filtered:
-                    st.info("No listings yet. Create the first post!")
-                else:
-                    stats_cols = st.columns(4)
-                    total_count = len(forum_posts)
-                    active_count = sum(1 for status, _ in filtered if status == "Active")
-                    auction_count = sum(1 for _, post in filtered if post.get("listing_type") == "Auction")
-                    ending_soon_count = sum(
-                        1 for _, post in filtered
-                        if post.get("listing_type") == "Auction"
-                        and (get_auction_end_dt(post) and get_auction_end_dt(post) <= forum_now() + timedelta(days=2))
-                    )
-                    stats_cols[0].metric("Listings", f"{total_count}")
-                    stats_cols[1].metric("Active", f"{active_count}")
-                    stats_cols[2].metric("Auctions", f"{auction_count}")
-                    stats_cols[3].metric("Ending Soon", f"{ending_soon_count}")
-
-                    featured = sorted(
-                        filtered,
-                        key=lambda pair: get_listing_price_value(pair[1]) or 0.0,
-                        reverse=True
-                    )[:3]
-                    if featured:
-                        st.markdown("#### Featured Picks")
-                        feat_cols = st.columns(len(featured))
-                        for idx, (status, post) in enumerate(featured):
-                            with feat_cols[idx]:
-                                render_marketplace_card(post, status, "featured")
-
-                    post_ids = [post.get("id") for _, post in filtered]
-                    if st.session_state.market_selected_post_id not in post_ids:
-                        st.session_state.market_selected_post_id = post_ids[0]
-
-                    card_cols = st.columns(3)
-                    for idx, (status, post) in enumerate(filtered):
-                        with card_cols[idx % 3]:
-                            render_marketplace_card(post, status, "grid")
-
-                    selected_post = None
-                    selected_status = None
-                    for status, post in filtered:
-                        if post.get("id") == st.session_state.market_selected_post_id:
-                            selected_post = post
-                            selected_status = status
-                            break
-                    st.markdown("---")
-                    if selected_post:
-                        render_listing_detail_panel(selected_post, selected_status or get_post_status(selected_post))
-                    else:
-                        st.info("Select a listing to view details.")
-
-        with forum_tabs[1]:
-            st.markdown("### Watchlist")
-            watchlist_items = [post for post in forum_posts if post.get("id") in st.session_state.market_watchlist]
-            if not watchlist_items:
-                st.info("No watchlist items yet. Tap Watch on a listing to save it here.")
-            else:
-                watchlist_items.sort(key=lambda post: parse_forum_date(post.get("created_at", "")), reverse=True)
-                watchlist_pairs = [(get_post_status(post), post) for post in watchlist_items]
-                watchlist_cols = st.columns(3)
-                for idx, (status, post) in enumerate(watchlist_pairs):
-                    with watchlist_cols[idx % 3]:
-                        render_marketplace_card(post, status, "watchlist")
-                watch_ids = [post.get("id") for _, post in watchlist_pairs]
-                selected_id = st.session_state.get("market_selected_post_id")
-                if selected_id not in watch_ids:
-                    st.session_state.market_selected_post_id = watch_ids[0]
-                selected_post = None
-                selected_status = None
-                for status, post in watchlist_pairs:
-                    if post.get("id") == st.session_state.market_selected_post_id:
-                        selected_post = post
-                        selected_status = status
-                        break
-                st.markdown("---")
-                if selected_post:
-                    render_listing_detail_panel(selected_post, selected_status or get_post_status(selected_post))
-
-        with forum_tabs[2]:
-            st.markdown("### Create Listing")
-            if not community_ready:
-                st.info("Community is not ready yet. Configure Supabase in the setup section at the bottom of this page.")
-            elif community_is_banned(community_settings, db, user):
-                st.error("Your account is suspended from posting.")
-            else:
-                st.markdown("**Community Rules**")
-                for rule in COMMUNITY_RULES:
-                    st.markdown(f"- {rule}")
-                st.markdown("**Marketplace Disclaimer**")
-                st.caption(
-                    "Transactions are arranged directly between users. Buyers and sellers must contact each other "
-                    "to settle payment and delivery outside of the app using their preferred method. "
-                    "We provide the community forum only and take no responsibility for sales, disputes, "
-                    "or fraudulent activity."
-                )
-                prefill = st.checkbox("Prefill from my portfolio", value=bool(portfolio))
-                prefill_asset = None
-                if prefill and portfolio:
-                    asset_options = [f"{i+1}. {asset['name']} ({asset['type']})" for i, asset in enumerate(portfolio)]
-                    selected_asset_label = st.selectbox("Choose asset", asset_options)
-                    selected_index = int(selected_asset_label.split(".")[0]) - 1
-                    if 0 <= selected_index < len(portfolio):
-                        prefill_asset = portfolio[selected_index]
-
-                default_title = prefill_asset.get("name", "") if prefill_asset else ""
-                default_category = prefill_asset.get("type", "Other") if prefill_asset else "Other"
-                default_body = ""
-                default_price = 0.0
-                if prefill_asset:
-                    default_body = f"{prefill_asset.get('type')} in {prefill_asset.get('condition')} condition. Qty {prefill_asset.get('qty', 1)}."
-                    default_price = to_display_currency(ai_valuation(prefill_asset)[0], currency_rate)
-
-                category_search = st.text_input(
+            def render_listing_edit_form(post, key_prefix):
+                post_id = post.get("id")
+                listing_type_value = post.get("listing_type") or "For Sale"
+                listing_type_options = ["For Sale", "Auction", "Discussion"]
+                try:
+                    listing_type_index = listing_type_options.index(listing_type_value)
+                except ValueError:
+                    listing_type_index = 0
+                category_filter = st.text_input(
                     "Filter categories (optional)",
-                    placeholder="Type to filter categories (e.g., bullion, coins, trading cards)",
-                    key="market_category_search"
+                    placeholder="Type to filter categories (e.g., bullion, cards, coins)",
+                    key=f"{key_prefix}_category_filter_{post_id}"
                 )
+                category_list = list(COMMUNITY_CATEGORY_OPTIONS)
+                category_list += [asset.get("type", "Other") for asset in portfolio]
+                category_value = post.get("category", "Other")
+                if category_value not in category_list:
+                    category_list.append(category_value)
+                category_list = filter_category_options(category_list, category_filter)
+                if category_value not in category_list:
+                    category_list.insert(0, category_value)
+                try:
+                    category_index = category_list.index(category_value)
+                except ValueError:
+                    category_index = 0
 
-                with st.form("create_listing_form"):
-                    listing_type = st.selectbox("Listing Type", ["For Sale", "Auction", "Discussion"])
-                    category_list = list(COMMUNITY_CATEGORY_OPTIONS)
-                    extra_categories = [default_category] + [asset.get("type", "Other") for asset in portfolio]
-                    for extra in sorted({c for c in extra_categories if c} - set(category_list)):
-                        category_list.append(extra)
-                    category_list = filter_category_options(category_list, category_search)
-                    category = st.selectbox(
+                starting_bid_default, min_increment_default, end_date_default = get_auction_fields(post)
+                reserve_default = get_reserve_amount(post) if supports_reserve else None
+                buy_now_default = get_buy_now_price(post) if supports_buy_now else None
+                end_date_value = None
+                if end_date_default:
+                    try:
+                        end_date_value = datetime.fromisoformat(str(end_date_default)).date()
+                    except Exception:
+                        try:
+                            end_date_value = datetime.strptime(str(end_date_default), "%Y-%m-%d").date()
+                        except Exception:
+                            end_date_value = None
+                if end_date_value is None:
+                    end_date_value = datetime.now().date() + timedelta(days=7)
+
+                with st.form(f"{key_prefix}_edit_listing_form_{post_id}"):
+                    edit_listing_type = st.selectbox(
+                        "Listing Type",
+                        listing_type_options,
+                        index=listing_type_index,
+                        key=f"{key_prefix}_edit_listing_type_{post_id}"
+                    )
+                    edit_category = st.selectbox(
                         "Category",
                         category_list,
-                        index=category_list.index(default_category) if default_category in category_list else 0
+                        index=category_index,
+                        key=f"{key_prefix}_edit_listing_category_{post_id}"
                     )
-                    title = st.text_input("Title", value=default_title)
-                    description = st.text_area("Description", value=default_body, height=120)
-                    grading_type = grading_type_for_category(category)
-                    grading_company = None
-                    grading_grade = None
+                    edit_title = st.text_input(
+                        "Title",
+                        value=post.get("title", ""),
+                        key=f"{key_prefix}_edit_listing_title_{post_id}"
+                    )
+                    edit_description = st.text_area(
+                        "Description",
+                        value=post.get("body", ""),
+                        height=120,
+                        key=f"{key_prefix}_edit_listing_body_{post_id}"
+                    )
+                    grading_type = grading_type_for_category(edit_category)
+                    edit_grading_company = None
+                    edit_grading_grade = None
                     if grading_type:
                         st.markdown("#### Grading (optional)")
                         if supports_grading:
@@ -10640,499 +9650,1642 @@ if forum_tab is not None:
                             else:
                                 company_options = CARD_GRADING_COMPANIES
                                 grade_options = CARD_GRADE_OPTIONS
-                            grading_company = st.selectbox(
+                            existing_company = post.get("grading_company") or "Ungraded / None"
+                            existing_grade = post.get("grading_grade") or "Ungraded"
+                            if existing_company not in (["Ungraded / None"] + company_options):
+                                company_options = [existing_company] + company_options
+                            if existing_grade not in grade_options:
+                                grade_options = [existing_grade] + grade_options
+                            edit_grading_company = st.selectbox(
                                 "Grading Company",
                                 ["Ungraded / None"] + company_options,
-                                key="listing_grading_company"
+                                index=(["Ungraded / None"] + company_options).index(existing_company),
+                                key=f"{key_prefix}_edit_listing_grade_company_{post_id}"
                             )
-                            grading_grade = st.selectbox(
+                            edit_grading_grade = st.selectbox(
                                 "Grade",
                                 grade_options,
-                                key="listing_grading_grade"
+                                index=grade_options.index(existing_grade),
+                                key=f"{key_prefix}_edit_listing_grade_{post_id}"
                             )
-                            if grading_company == "Ungraded / None":
-                                grading_company = None
-                            if grading_grade == "Ungraded":
-                                grading_grade = None
+                            if edit_grading_company == "Ungraded / None":
+                                edit_grading_company = None
+                            if edit_grading_grade == "Ungraded":
+                                edit_grading_grade = None
                         else:
                             st.caption("Grading fields require a schema update. Run the migration helper below.")
-                    listing_images = []
+                    existing_images = post.get("images") or []
+                    display_images = get_post_images(post)
+                    if display_images:
+                        preview_cols = st.columns(min(len(display_images), 5))
+                        for idx, img in enumerate(display_images):
+                            with preview_cols[idx]:
+                                st.image(img, width=140)
+                    replace_images = []
+                    remove_images = False
                     if supports_images:
-                        listing_images = st.file_uploader(
-                            f"Listing Photos (max {MAX_LISTING_IMAGES})",
+                        replace_images = st.file_uploader(
+                            f"Replace Photos (max {MAX_LISTING_IMAGES})",
                             type=["jpg", "jpeg", "png"],
-                            accept_multiple_files=True
+                            accept_multiple_files=True,
+                            key=f"{key_prefix}_edit_listing_images_{post_id}"
                         )
-                        if listing_images:
-                            image_error = validate_listing_images(listing_images)
+                        if replace_images:
+                            image_error = validate_listing_images(replace_images)
                             if image_error:
                                 st.warning(image_error)
-                                listing_images = listing_images[:MAX_LISTING_IMAGES]
-                        if listing_images:
-                            preview_cols = st.columns(min(len(listing_images), 5))
-                            for idx, img in enumerate(listing_images[:5]):
-                                with preview_cols[idx]:
-                                    st.image(img, width=140)
+                                replace_images = replace_images[:MAX_LISTING_IMAGES]
+                        remove_images = st.checkbox(
+                            "Remove existing photos",
+                            value=False,
+                            key=f"{key_prefix}_edit_listing_remove_images_{post_id}"
+                        )
                     else:
                         st.caption("Photo uploads require a schema update. Run the migration helper below.")
-                    default_country = get_country_name(get_country_code(user_settings))
-                    location = st.text_input(
+                    edit_location = st.text_input(
                         "Country (required)",
-                        value=default_country,
-                        help="Enter the country where the item is located. Add city/region in the description if needed."
+                        value=post.get("location", ""),
+                        help="Enter the country where the item is located. Add city/region after the country if needed.",
+                        key=f"{key_prefix}_edit_listing_location_{post_id}"
                     )
-                    price = None
-                    starting_bid = None
-                    min_increment = None
-                    reserve_amount = None
-                    buy_now_price = None
-                    end_date = None
-                    if listing_type == "For Sale":
-                        price = st.number_input(f"Price ({currency_code})", min_value=0.0, value=float(default_price), step=1.0)
-                    elif listing_type == "Auction":
-                        starting_bid = st.number_input(f"Starting Bid ({currency_code})", min_value=0.0, value=float(default_price), step=1.0)
-                        min_increment = st.number_input(f"Minimum Increment ({currency_code})", min_value=0.0, value=10.0, step=1.0)
+                    edit_price = None
+                    edit_starting_bid = None
+                    edit_min_increment = None
+                    edit_reserve = None
+                    edit_buy_now = None
+                    edit_end_date = None
+                    listing_currency = post.get("currency", currency_code)
+                    if edit_listing_type == "For Sale":
+                        edit_price = st.number_input(
+                            f"Price ({listing_currency})",
+                            min_value=0.0,
+                            value=float(post.get("price") or 0.0),
+                            step=1.0,
+                            key=f"{key_prefix}_edit_listing_price_{post_id}"
+                        )
+                    elif edit_listing_type == "Auction":
+                        edit_starting_bid = st.number_input(
+                            f"Starting Bid ({listing_currency})",
+                            min_value=0.0,
+                            value=float(starting_bid_default or 0.0),
+                            step=1.0,
+                            key=f"{key_prefix}_edit_listing_starting_{post_id}"
+                        )
+                        edit_min_increment = st.number_input(
+                            f"Minimum Increment ({listing_currency})",
+                            min_value=0.0,
+                            value=float(min_increment_default or 0.0),
+                            step=1.0,
+                            key=f"{key_prefix}_edit_listing_increment_{post_id}"
+                        )
                         if supports_reserve:
-                            reserve_amount = st.number_input(f"Reserve Amount ({currency_code})", min_value=0.0, value=0.0, step=1.0)
+                            edit_reserve = st.number_input(
+                                f"Reserve Amount ({listing_currency})",
+                                min_value=0.0,
+                                value=float(reserve_default or 0.0),
+                                step=1.0,
+                                key=f"{key_prefix}_edit_listing_reserve_{post_id}"
+                            )
                         else:
                             st.caption("Reserve amounts require a schema update. Run the migration helper.")
                         if supports_buy_now:
-                            buy_now_price = st.number_input(f"Buy Now Price ({currency_code})", min_value=0.0, value=0.0, step=1.0)
+                            edit_buy_now = st.number_input(
+                                f"Buy Now Price ({listing_currency})",
+                                min_value=0.0,
+                                value=float(buy_now_default or 0.0),
+                                step=1.0,
+                                key=f"{key_prefix}_edit_listing_buy_now_{post_id}"
+                            )
                         else:
                             st.caption("Buy Now requires a schema update. Run the migration helper.")
-                        end_date = st.date_input("Auction End Date", value=datetime.now().date() + timedelta(days=7))
+                        edit_end_date = st.date_input(
+                            "Auction End Date",
+                            value=end_date_value,
+                            key=f"{key_prefix}_edit_listing_end_date_{post_id}"
+                        )
+                    submit_edit = st.form_submit_button("Save Changes")
 
-                    agree_rules = st.checkbox("I agree to the Community Rules above.")
-                    agree_terms = st.checkbox("I agree to the Marketplace Disclaimer above.")
-                    submit_listing = st.form_submit_button("Post Listing")
-
-                if submit_listing:
-                    if not title.strip():
+                if submit_edit:
+                    if not edit_title.strip():
                         st.error("Title is required.")
-                    elif not location.strip():
+                    elif not edit_location.strip():
                         st.error("Country is required.")
-                    elif not description.strip():
+                    elif not edit_description.strip():
                         st.error("Description is required.")
-                    elif validate_community_text(f"{title} {description} {location}"):
+                    elif validate_community_text(f"{edit_title} {edit_description} {edit_location}"):
                         st.error("Your listing contains content that violates the Community Rules.")
-                    elif listing_images and validate_listing_images(listing_images):
-                        st.error(validate_listing_images(listing_images))
-                    elif not agree_rules:
-                        st.error("You must agree to the Community Rules to post a listing.")
-                    elif not agree_terms:
-                        st.error("You must agree to the Marketplace Disclaimer to post a listing.")
-                    elif listing_type == "Auction" and supports_reserve and reserve_amount and starting_bid is not None and reserve_amount < starting_bid:
+                    elif replace_images and validate_listing_images(replace_images):
+                        st.error(validate_listing_images(replace_images))
+                    elif edit_listing_type == "Auction" and supports_reserve and edit_reserve and edit_starting_bid is not None and edit_reserve < edit_starting_bid:
                         st.error("Reserve amount should be equal to or higher than the starting bid.")
-                    elif listing_type == "Auction" and supports_buy_now and buy_now_price and reserve_amount and buy_now_price < reserve_amount:
+                    elif edit_listing_type == "Auction" and supports_buy_now and edit_buy_now and edit_reserve and edit_buy_now < edit_reserve:
                         st.error("Buy Now price should be equal to or higher than the reserve.")
                     else:
-                        encoded_images = encode_uploaded_images(listing_images) if (supports_images and listing_images) else []
-                        post_payload = {
-                            "id": secrets.token_hex(6),
-                            "title": title.strip(),
-                            "body": description.strip(),
-                            "category": category,
-                            "listing_type": listing_type,
-                            "price": float(price) if price is not None else None,
-                            "currency": currency_code,
-                            "location": location.strip(),
-                            "created_by": user,
-                            "created_at": datetime.now().isoformat(),
-                            "status": "Active",
-                            "auction_starting_bid": float(starting_bid) if starting_bid is not None else None,
-                            "auction_min_increment": float(min_increment) if min_increment is not None else None,
-                            "reserve_amount": float(reserve_amount) if supports_reserve and reserve_amount and reserve_amount > 0 else None,
-                            "buy_now_price": float(buy_now_price) if supports_buy_now and buy_now_price and buy_now_price > 0 else None,
-                            "auction_end_date": end_date.isoformat() if end_date else None,
-                            "images": encoded_images or None
+                        update_images = None
+                        if supports_images and remove_images:
+                            update_images = []
+                        elif supports_images and replace_images:
+                            update_images = encode_uploaded_images(replace_images)
+                        update_payload = {
+                            "title": edit_title.strip(),
+                            "body": edit_description.strip(),
+                            "category": edit_category,
+                            "listing_type": edit_listing_type,
+                            "location": edit_location.strip(),
+                            "currency": listing_currency,
+                            "price": float(edit_price) if edit_listing_type == "For Sale" else None,
+                            "auction_starting_bid": float(edit_starting_bid) if edit_listing_type == "Auction" else None,
+                            "auction_min_increment": float(edit_min_increment) if edit_listing_type == "Auction" else None,
+                            "reserve_amount": float(edit_reserve) if edit_listing_type == "Auction" and supports_reserve and edit_reserve and edit_reserve > 0 else None,
+                            "buy_now_price": float(edit_buy_now) if edit_listing_type == "Auction" and supports_buy_now and edit_buy_now and edit_buy_now > 0 else None,
+                            "auction_end_date": edit_end_date.isoformat() if edit_listing_type == "Auction" and edit_end_date else None
                         }
-                        if supabase_auth_required(community_settings) and supports_owner_id and auth_user_id:
-                            post_payload["owner_id"] = auth_user_id
                         if supports_grading:
-                            if grading_company:
-                                post_payload["grading_company"] = grading_company
-                            if grading_grade:
-                                post_payload["grading_grade"] = grading_grade
-                        if not post_payload.get("reserve_amount"):
-                            post_payload.pop("reserve_amount", None)
-                        if not post_payload.get("buy_now_price"):
-                            post_payload.pop("buy_now_price", None)
-                        if not post_payload.get("images"):
-                            post_payload.pop("images", None)
-                        if supabase_enabled(community_settings):
-                            post_payload.pop("id", None)
-                        _, err = community_create_post(community_settings, db, post_payload)
+                            if grading_type:
+                                update_payload["grading_company"] = edit_grading_company
+                                update_payload["grading_grade"] = edit_grading_grade
+                            else:
+                                update_payload["grading_company"] = None
+                                update_payload["grading_grade"] = None
+                        if update_images is not None:
+                            update_payload["images"] = update_images
+                        if not supports_reserve:
+                            update_payload.pop("reserve_amount", None)
+                        if not supports_buy_now:
+                            update_payload.pop("buy_now_price", None)
+                        _, err = community_update_post(community_settings, db, post.get("id"), update_payload)
                         if err:
                             st.error(err)
                         else:
-                            save_data(db)
-                            st.success("Listing posted.")
+                            st.success("Listing updated.")
+                            st.session_state.edit_listing_id = None
                             request_scroll_to_top()
                             st.rerun()
 
-        with forum_tabs[3]:
-            st.markdown("### My Listings")
-            if not community_ready:
-                st.info("Community is not ready yet. Configure Supabase in the setup section at the bottom of this page.")
-            else:
-                my_posts = [post for post in forum_posts if post.get("created_by") == user]
-                if not my_posts:
-                    st.info("You haven't posted anything yet.")
-                else:
-                    my_posts.sort(key=lambda post: parse_forum_date(post.get("created_at", "")), reverse=True)
-                    for post in my_posts:
-                        status = get_post_status(post)
-                        header = f"{post.get('title', 'Listing')} • {post.get('listing_type')} • {status}"
-                        with st.expander(header):
-                            st.write(post.get("body", ""))
-                            st.caption(f"Posted {post.get('created_at','')}")
-                            post_images = get_post_images(post)
-                            if post_images:
-                                image_cols = st.columns(min(len(post_images), 5))
-                                for idx, img in enumerate(post_images):
-                                    with image_cols[idx]:
-                                        st.image(img, width=160)
-                            if post.get("listing_type") == "Auction":
-                                reserve_amount = get_reserve_amount(post) if supports_reserve else None
-                                buy_now_price = get_buy_now_price(post) if supports_buy_now else None
-                                _, _, end_date = get_auction_fields(post)
-                                time_left_label = format_time_left(end_date, user_settings)
-                                if time_left_label:
-                                    st.caption(time_left_label)
-                                if reserve_amount:
-                                    st.caption(f"Reserve: {post.get('currency', currency_code)} {float(reserve_amount):,.2f}")
-                                if buy_now_price:
-                                    st.caption(f"Buy Now: {post.get('currency', currency_code)} {float(buy_now_price):,.2f}")
-                            if st.button("Edit Listing", key=f"edit_listing_open_my_{post.get('id')}"):
-                                st.session_state.edit_listing_id = post.get("id")
-                                st.session_state.edit_listing_origin = "my"
+            def render_marketplace_card(post, status, key_prefix="card"):
+                post_id = post.get("id", "")
+                listing_type = post.get("listing_type", "Discussion")
+                currency = post.get("currency", currency_code)
+                title = escape_html(post.get("title", "Listing"))
+                category = escape_html(post.get("category", "Other"))
+                country = escape_html(post.get("location", ""))
+                seller = escape_html(post.get("created_by", "Seller"))
+                image_src = escape_html(get_listing_card_image(post))
+                is_new = is_recent_listing(post, days=7)
+                photo_count = len(get_post_images(post))
+
+                price_label = ""
+                price_value = post.get("price")
+                if listing_type == "For Sale" and price_value:
+                    price_label = f"{currency} {float(price_value):,.2f}"
+                elif listing_type == "Auction":
+                    starting_bid, _, _ = get_auction_fields(post)
+                    if starting_bid:
+                        price_label = f"Starting {currency} {float(starting_bid):,.2f}"
+
+                time_left_label = ""
+                if listing_type == "Auction":
+                    _, _, end_date = get_auction_fields(post)
+                    time_left_label = format_time_left(end_date, user_settings) or ""
+
+                badges = [
+                    f'<span class="market-pill gold">{escape_html(listing_type)}</span>',
+                    f'<span class="market-pill">{escape_html(status)}</span>'
+                ]
+                if time_left_label:
+                    badges.append(f'<span class="market-pill warning">{escape_html(time_left_label)}</span>')
+                if is_new:
+                    badges.append('<span class="market-pill success">NEW</span>')
+                if photo_count:
+                    badges.append(f'<span class="market-pill">Photos {photo_count}</span>')
+                if post.get("buy_now_price"):
+                    badges.append('<span class="market-pill gold">Buy Now</span>')
+                badges_html = "".join(badges)
+
+                price_tag_html = f'<div class="market-price-tag">{price_label}</div>' if price_label else ''
+                card_html = (
+                    '<div class="market-card">'
+                    f'<div class="market-image"><img src="{image_src}" alt="Listing image" />{price_tag_html}</div>'
+                    f'<div class="market-body"><div class="market-badges">{badges_html}</div>'
+                    f'<div class="market-title">{title}</div>'
+                    f'<div class="market-meta">{country} · {category} · @{seller}</div>'
+                    '</div></div>'
+                )
+                render_html_block(card_html)
+                actions = st.columns([1, 1])
+                with actions[0]:
+                    if st.button("View", key=f"{key_prefix}_view_listing_{post_id}"):
+                        st.session_state.market_selected_post_id = post_id
+                        request_scroll_to_top()
+                        st.rerun()
+                with actions[1]:
+                    if user == post.get("created_by"):
+                        if st.button("Edit", key=f"{key_prefix}_edit_listing_card_{post_id}"):
+                            st.session_state.edit_listing_id = post_id
+                            st.session_state.edit_listing_origin = "browse"
+                            request_scroll_to_top()
+                            st.rerun()
+                    else:
+                        watchlist = st.session_state.market_watchlist
+                        is_watching = post_id in watchlist
+                        label = "Watching" if is_watching else "Watch"
+                        if st.button(label, key=f"{key_prefix}_watch_listing_{post_id}"):
+                            if is_watching:
+                                watchlist.discard(post_id)
+                            else:
+                                watchlist.add(post_id)
+                            st.session_state.market_watchlist = watchlist
+                            persist_market_watchlist(db, user, watchlist)
+                            st.rerun()
+
+            def render_listing_detail_panel(post, status):
+                post_id = post.get("id", "")
+                price = post.get("price")
+                currency = post.get("currency", currency_code)
+                listing_type = post.get("listing_type", "Discussion")
+                title = post.get("title", "Listing")
+
+                header_cols = st.columns([3, 1])
+                with header_cols[0]:
+                    st.markdown(f"### {title}")
+                    st.caption(f"Posted by {post.get('created_by', 'Unknown')} • {post.get('created_at', '')}")
+                with header_cols[1]:
+                    watchlist = st.session_state.market_watchlist
+                    is_watching = post_id in watchlist
+                    label = "Watching" if is_watching else "Watch"
+                    if st.button(label, key=f"watch_listing_detail_{post_id}"):
+                        if is_watching:
+                            watchlist.discard(post_id)
+                        else:
+                            watchlist.add(post_id)
+                        st.session_state.market_watchlist = watchlist
+                        persist_market_watchlist(db, user, watchlist)
+                        st.rerun()
+
+                detail_cols = st.columns([1.3, 1])
+                with detail_cols[0]:
+                    post_images = get_post_images(post)
+                    if post_images:
+                        image_cols = st.columns(min(len(post_images), 3))
+                        for idx, img in enumerate(post_images[:3]):
+                            with image_cols[idx]:
+                                st.image(img, width=220)
+                    st.write(post.get("body", ""))
+                    if post.get("category"):
+                        st.write(f"Category: {post.get('category')}")
+                    if post.get("grading_company") or post.get("grading_grade"):
+                        company = post.get("grading_company") or ""
+                        grade = post.get("grading_grade") or ""
+                        label = f"{company} {grade}".strip()
+                        st.write(f"Grade: {label}")
+                    if post.get("location"):
+                        st.write(f"Country: {post.get('location')}")
+                    if status == "Sold" and post.get("sold_price") is not None:
+                        st.markdown(f"**Sold for:** {currency} {float(post.get('sold_price')):,.2f}")
+
+                with detail_cols[1]:
+                    summary_card = st.container()
+                    with summary_card:
+                        st.markdown("#### Listing Summary")
+                        if listing_type == "For Sale":
+                            st.metric("Asking Price", f"{currency} {float(price or 0.0):,.2f}")
+                        elif listing_type == "Auction":
+                            starting_bid, min_increment, end_date = get_auction_fields(post)
+                            st.metric("Starting Bid", f"{currency} {float(starting_bid or 0.0):,.2f}")
+                            if end_date:
+                                st.caption(f"Auction ends: {end_date}")
+                        if post.get("buy_now_price"):
+                            st.metric("Buy Now", f"{currency} {float(post.get('buy_now_price')):,.2f}")
+                        if post.get("reserve_amount"):
+                            st.metric("Reserve", f"{currency} {float(post.get('reserve_amount')):,.2f}")
+                        if user == post.get("created_by"):
+                            if st.button("Edit Listing", key=f"edit_listing_detail_{post_id}"):
+                                st.session_state.edit_listing_id = post_id
+                                st.session_state.edit_listing_origin = "browse"
                                 request_scroll_to_top()
                                 st.rerun()
-                            sale_cols = st.columns(3)
-                            with sale_cols[0]:
-                                if st.button("Close Listing", key=f"close_listing_{post.get('id')}"):
-                                    _, err = community_update_post(community_settings, db, post.get("id"), {"status": "Closed"})
-                                    if err:
-                                        st.error(err)
-                                    else:
-                                        st.success("Listing closed.")
-                                        st.rerun()
-                            with sale_cols[1]:
-                                default_sold_price = float(post.get("price") or 0.0)
-                                if post.get("listing_type") == "Auction":
-                                    bids, _ = community_get_bids(community_settings, db, post.get("id"))
-                                    if bids:
-                                        default_sold_price = max([b.get("amount", 0.0) for b in bids])
-                                sold_price = st.number_input(
-                                    f"Sold Price ({post.get('currency', currency_code)})",
+
+                if listing_type == "Auction":
+                    starting_bid, min_increment, end_date = get_auction_fields(post)
+                    reserve_amount = get_reserve_amount(post) if supports_reserve else None
+                    buy_now_price = get_buy_now_price(post) if supports_buy_now else None
+                    bids, bid_err = community_get_bids(community_settings, db, post_id)
+                    if bid_err:
+                        st.error(bid_err)
+                        bids = []
+                    current_bid = max([b.get("amount", 0.0) for b in bids], default=starting_bid or 0.0)
+                    st.markdown(f"**Current Bid:** {currency} {current_bid:,.2f}")
+                    st.caption(f"Minimum Increment: {currency} {float(min_increment or 0.0):,.2f}")
+                    if reserve_amount:
+                        st.caption(f"Reserve: {currency} {float(reserve_amount):,.2f}")
+                        if current_bid >= float(reserve_amount):
+                            st.success("Reserve met")
+                        else:
+                            st.warning("Reserve not met yet")
+                    if buy_now_price:
+                        st.caption(f"Buy Now: {currency} {float(buy_now_price):,.2f}")
+                    if end_date:
+                        st.write(f"Auction ends: {end_date}")
+
+                    if bids:
+                        recent = sorted(bids, key=lambda b: parse_forum_date(b.get("created_at", "")), reverse=True)[:5]
+                        st.markdown("**Recent Bids**")
+                        for bid in recent:
+                            st.write(f"{bid.get('user','User')}: {currency} {float(bid.get('amount', 0.0)):,.2f}")
+
+                    if status == "Active":
+                        if is_banned:
+                            st.info("You cannot bid while suspended.")
+                        else:
+                            with st.form(f"bid_form_{post_id}"):
+                                bid_amount = st.number_input(
+                                    f"Place Bid ({currency})",
                                     min_value=0.0,
-                                    value=float(default_sold_price),
-                                    step=1.0,
-                                    key=f"sold_price_{post.get('id')}"
+                                    value=float(current_bid + max(min_increment or 0.0, 1.0)),
+                                    step=1.0
                                 )
-                                if st.button("Mark as Sold", key=f"mark_sold_{post.get('id')}"):
-                                    _, err = community_update_post(community_settings, db, post.get("id"), {
-                                        "status": "Sold",
-                                        "sold_price": float(sold_price),
-                                        "sold_at": datetime.now().isoformat()
-                                    })
+                                submit_bid = st.form_submit_button("Submit Bid")
+                            if submit_bid:
+                                if bid_amount < current_bid + (min_increment or 0.0):
+                                    st.error(f"Bid must be at least {currency} {current_bid + (min_increment or 0.0):,.2f}.")
+                                else:
+                                    bid_payload = {
+                                        "post_id": post_id,
+                                        "amount": float(bid_amount),
+                                        "user": user,
+                                        "created_at": datetime.now().isoformat()
+                                    }
+                                    if supabase_auth_required(community_settings) and supports_owner_id and auth_user_id:
+                                        bid_payload["owner_id"] = auth_user_id
+                                    _, err = community_add_bid(community_settings, db, bid_payload)
                                     if err:
                                         st.error(err)
                                     else:
-                                        st.success("Listing marked as sold.")
-                                        st.rerun()
-                            with sale_cols[2]:
-                                if st.button("Delete Listing", key=f"delete_listing_{post.get('id')}"):
-                                    _, err = community_delete_post(community_settings, db, post.get("id"))
-                                    if err:
-                                        st.error(err)
-                                    else:
-                                        st.success("Listing deleted.")
+                                        seller = post.get("created_by")
+                                        if seller and seller != user:
+                                            recipient_id = community_lookup_user_auth_id(community_settings, seller) if supabase_auth_required(community_settings) else None
+                                            if supabase_auth_required(community_settings) and not recipient_id:
+                                                st.warning("Bid placed, but seller has not linked a Community account yet.")
+                                            else:
+                                                msg_payload = {
+                                                    "sender": user,
+                                                    "recipient": seller,
+                                                    "subject": f"New bid on {post.get('title', 'your listing')}",
+                                                    "body": f"{user} placed a bid of {currency} {float(bid_amount):,.2f}.",
+                                                    "created_at": datetime.now().isoformat(),
+                                                    "read_at": None
+                                                }
+                                                if supabase_auth_required(community_settings) and auth_user_id:
+                                                    msg_payload["sender_id"] = auth_user_id
+                                                    msg_payload["recipient_id"] = recipient_id
+                                                _, msg_err = community_send_message(community_settings, db, msg_payload)
+                                                if msg_err:
+                                                    st.warning(f"Bid placed, but could not notify seller: {msg_err}")
+                                        st.success("Bid submitted.")
                                         st.rerun()
 
-        with forum_tabs[4]:
-            st.markdown("### Private Messages")
-            if not community_ready:
-                st.info("Community is not ready yet. Configure Supabase in the setup section at the bottom of this page.")
-            else:
-                msg_cols = st.columns(2)
-                with msg_cols[0]:
-                    st.markdown("**Inbox**")
-                    inbox, inbox_err = community_get_messages(community_settings, db, user, box="inbox")
-                    if inbox_err:
-                        st.error(inbox_err)
-                    else:
-                        for msg in inbox[:10]:
-                            status = "Unread" if not msg.get("read_at") else "Read"
-                            with st.expander(f"From {msg.get('sender')} • {status}"):
-                                st.caption(msg.get("created_at", ""))
-                                st.write(msg.get("subject", ""))
-                                st.write(msg.get("body", ""))
-                                if not msg.get("read_at") and msg.get("id"):
-                                    if st.button("Mark Read", key=f"mark_read_{msg.get('id')}"):
-                                        _, err = community_mark_message_read(community_settings, db, msg.get("id"))
-                                        if err:
-                                            st.error(err)
-                                        else:
-                                            st.success("Marked as read.")
-                                            st.rerun()
-                with msg_cols[1]:
-                    st.markdown("**Send Message**")
-                    if is_banned:
-                        st.info("You cannot send messages while suspended.")
-                    else:
-                        with st.form("send_message_form"):
-                            recipient = st.text_input("Recipient Username")
-                            subject = st.text_input("Subject")
-                            body = st.text_area("Message", height=120)
-                            send_msg = st.form_submit_button("Send")
-                        if send_msg:
-                            if not recipient or not body.strip():
-                                st.error("Recipient and message are required.")
-                            elif validate_community_text(f"{subject} {body}"):
-                                st.error("Your message violates the Community Rules.")
-                            else:
-                                recipient_name = recipient.strip()
-                                recipient_id = community_lookup_user_auth_id(community_settings, recipient_name) if supabase_auth_required(community_settings) else None
-                                if supabase_auth_required(community_settings) and not recipient_id:
-                                    st.error("Recipient has not linked a Community account yet.")
-                                else:
-                                    _, err = community_send_message(community_settings, db, {
-                                        "sender": user,
-                                        "recipient": recipient_name,
-                                        "sender_id": auth_user_id if supabase_auth_required(community_settings) else None,
-                                        "recipient_id": recipient_id,
-                                        "subject": subject.strip(),
-                                        "body": body.strip(),
-                                        "created_at": datetime.now().isoformat(),
-                                        "read_at": None
-                                    })
+                        if buy_now_price and user != post.get("created_by"):
+                            if st.button("Buy Now", key=f"buy_now_{post_id}"):
+                                _, err = community_update_post(community_settings, db, post_id, {
+                                    "status": "Sold",
+                                    "sold_price": float(buy_now_price),
+                                    "sold_at": datetime.now().isoformat()
+                                })
                                 if err:
                                     st.error(err)
                                 else:
-                                    st.success("Message sent.")
+                                    seller = post.get("created_by")
+                                    if seller and seller != user:
+                                        recipient_id = community_lookup_user_auth_id(community_settings, seller) if supabase_auth_required(community_settings) else None
+                                        if supabase_auth_required(community_settings) and not recipient_id:
+                                            st.warning("Purchase completed, but seller has not linked a Community account yet.")
+                                        else:
+                                            msg_payload = {
+                                                "sender": user,
+                                                "recipient": seller,
+                                                "subject": f"Buy Now purchase on {post.get('title', 'your listing')}",
+                                                "body": f"{user} purchased via Buy Now for {currency} {float(buy_now_price):,.2f}.",
+                                                "created_at": datetime.now().isoformat(),
+                                                "read_at": None
+                                            }
+                                            if supabase_auth_required(community_settings) and auth_user_id:
+                                                msg_payload["sender_id"] = auth_user_id
+                                                msg_payload["recipient_id"] = recipient_id
+                                            community_send_message(community_settings, db, msg_payload)
+                                    st.success("Purchase completed.")
                                     st.rerun()
-                    st.markdown("**Sent**")
-                    sent_messages, sent_err = community_get_messages(community_settings, db, user, box="sent")
-                    if sent_err:
-                        st.error(sent_err)
-                    else:
-                        for msg in sent_messages[:10]:
-                            with st.expander(f"To {msg.get('recipient')}"):
-                                st.caption(msg.get("created_at", ""))
-                                st.write(msg.get("subject", ""))
-                                st.write(msg.get("body", ""))
 
-        if is_mod:
-            with forum_tabs[5]:
+                if listing_type == "For Sale":
+                    st.markdown(f"**Asking Price:** {currency} {float(price or 0.0):,.2f}")
+                    offers, offer_err = community_get_offers(community_settings, db, post_id)
+                    if offer_err:
+                        st.error(offer_err)
+                    if status == "Active":
+                        if is_banned:
+                            st.info("You cannot send offers while suspended.")
+                        else:
+                            with st.form(f"offer_form_{post_id}"):
+                                offer_amount = st.number_input(
+                                    f"Send Offer ({currency})",
+                                    min_value=0.0,
+                                    value=float(price or 0.0),
+                                    step=1.0
+                                )
+                                submit_offer = st.form_submit_button("Send Offer")
+                            if submit_offer:
+                                offer_payload = {
+                                    "post_id": post_id,
+                                    "amount": float(offer_amount),
+                                    "user": user,
+                                    "created_at": datetime.now().isoformat()
+                                }
+                                if supabase_auth_required(community_settings) and supports_owner_id and auth_user_id:
+                                    offer_payload["owner_id"] = auth_user_id
+                                _, err = community_add_offer(community_settings, db, offer_payload)
+                                if err:
+                                    st.error(err)
+                                else:
+                                    st.success("Offer sent.")
+                                    st.rerun()
+
+                comments, comment_err = community_get_comments(community_settings, db, post_id)
+                if comment_err:
+                    st.error(comment_err)
+                    comments = []
+                st.markdown("**Comments**")
+                for comment in comments[-5:]:
+                    st.write(f"{comment.get('user', 'User')}: {comment.get('text', '')}")
+                if is_banned:
+                    st.info("You cannot comment while suspended.")
+                else:
+                    with st.form(f"comment_form_{post_id}"):
+                        comment_text = st.text_input("Add a comment", key=f"comment_input_{post_id}")
+                        submit_comment = st.form_submit_button("Post Comment")
+                    if submit_comment and comment_text.strip():
+                        if validate_community_text(comment_text):
+                            st.error("Your comment violates the Community Rules.")
+                        else:
+                            comment_payload = {
+                                "post_id": post_id,
+                                "user": user,
+                                "text": comment_text.strip(),
+                                "created_at": datetime.now().isoformat()
+                            }
+                            if supabase_auth_required(community_settings) and supports_owner_id and auth_user_id:
+                                comment_payload["owner_id"] = auth_user_id
+                            _, err = community_add_comment(community_settings, db, comment_payload)
+                            if err:
+                                st.error(err)
+                            else:
+                                st.success("Comment posted.")
+                                st.rerun()
+
+                if user != post.get("created_by"):
+                    if is_banned:
+                        st.info("You cannot message sellers while suspended.")
+                    else:
+                        with st.form(f"message_seller_{post_id}"):
+                            message_body = st.text_area("Message seller", height=80, key=f"msg_body_{post_id}")
+                            send_msg = st.form_submit_button("Send Message")
+                        if send_msg and message_body.strip():
+                            if validate_community_text(message_body):
+                                st.error("Your message violates the Community Rules.")
+                            else:
+                                recipient_name = post.get("created_by")
+                                recipient_id = community_lookup_user_auth_id(community_settings, recipient_name) if supabase_auth_required(community_settings) else None
+                                if supabase_auth_required(community_settings) and not recipient_id:
+                                    st.error("Seller has not linked a Community account yet.")
+                                else:
+                                    msg_payload = {
+                                        "sender": user,
+                                        "recipient": recipient_name,
+                                        "subject": f"Re: {post.get('title', '')}",
+                                        "body": message_body.strip(),
+                                        "created_at": datetime.now().isoformat(),
+                                        "read_at": None
+                                    }
+                                    if supabase_auth_required(community_settings) and auth_user_id:
+                                        msg_payload["sender_id"] = auth_user_id
+                                        msg_payload["recipient_id"] = recipient_id
+                                    _, err = community_send_message(community_settings, db, msg_payload)
+                                    if err:
+                                        st.error(err)
+                                    else:
+                                        st.success("Message sent.")
+                                        st.rerun()
+
+                report_cols = st.columns(2)
+                with report_cols[0]:
+                    if st.button("Report Listing", key=f"report_{post_id}"):
+                        report_payload = {
+                            "id": secrets.token_hex(6),
+                            "post_id": post_id,
+                            "reported_by": user,
+                            "reported_user": post.get("created_by"),
+                            "reason": "User reported",
+                            "created_at": datetime.now().isoformat()
+                        }
+                        if supabase_auth_required(community_settings) and supports_owner_id and auth_user_id:
+                            report_payload["owner_id"] = auth_user_id
+                        if supabase_enabled(community_settings):
+                            report_payload.pop("id", None)
+                        _, err = community_report_post(community_settings, db, report_payload)
+                        if err:
+                            st.error(err)
+                        else:
+                            st.success("Report submitted.")
+                            st.rerun()
+                if is_mod:
+                    with report_cols[1]:
+                        if st.button("Remove Listing", key=f"remove_{post_id}"):
+                            _, err = community_update_post(community_settings, db, post_id, {"status": "Removed"})
+                            if err:
+                                st.error(err)
+                            else:
+                                st.success("Listing removed.")
+                                st.rerun()
+
+            def render_listing_edit_modal():
+                post_id = st.session_state.get("edit_listing_id")
+                if not post_id:
+                    return
+                target_post = next((post for post in forum_posts if post.get("id") == post_id), None)
+                if not target_post:
+                    st.session_state.edit_listing_id = None
+                    return
+                dialog_ctx, dialog_supported = open_streamlit_dialog("Edit Listing")
+                if dialog_supported:
+                    with dialog_ctx:
+                        render_listing_edit_form(target_post, f"modal_{st.session_state.get('edit_listing_origin', 'browse')}")
+                        if st.button("Close", key=f"close_edit_listing_{post_id}"):
+                            st.session_state.edit_listing_id = None
+                            st.rerun()
+                else:
+                    dialog_fn = getattr(st, "dialog", None)
+                    if callable(dialog_fn):
+                        @dialog_fn("Edit Listing")
+                        def _edit_dialog():
+                            render_listing_edit_form(
+                                target_post,
+                                f"modal_{st.session_state.get('edit_listing_origin', 'browse')}"
+                            )
+                            if st.button("Close", key=f"close_edit_listing_{post_id}"):
+                                st.session_state.edit_listing_id = None
+                                st.rerun()
+                        _edit_dialog()
+                    else:
+                        st.markdown("### Edit Listing")
+                        st.caption("Your Streamlit version does not support modal dialogs. Showing the editor inline.")
+                        render_listing_edit_form(
+                            target_post,
+                            f"modal_{st.session_state.get('edit_listing_origin', 'browse')}"
+                        )
+                        if st.button("Close", key=f"close_edit_listing_{post_id}"):
+                            st.session_state.edit_listing_id = None
+                            st.rerun()
+                        st.stop()
+
+            render_listing_edit_modal()
+
+            with forum_tabs[0]:
                 if not community_ready:
                     st.info("Community is not ready yet. Configure Supabase in the setup section at the bottom of this page.")
                 else:
-                    if supabase_enabled(community_settings) and not community_use_service_role(community_settings):
-                        st.warning("Moderation actions require the Supabase service role key. Add it in secrets to enable bans and report management.")
-                    st.markdown("### Moderation")
-                    reports, report_err = community_get_reports(community_settings, db)
-                    if report_err:
-                        st.error(report_err)
-                    if not reports:
-                        st.info("No reports yet.")
+                    if AUTOREFRESH_AVAILABLE:
+                        live_updates = st.checkbox("Live updates (auto-refresh bids)", value=True, key="community_live_updates")
+                        if live_updates:
+                            st_autorefresh(interval=20000, key="community_live_refresh")
+                    st.markdown("### Browse Listings")
+                    category_seed = set(COMMUNITY_CATEGORY_OPTIONS)
+                    category_seed |= {post.get("category", "Other") for post in forum_posts}
+                    category_seed |= {asset.get("type", "Other") for asset in portfolio}
+                    category_options = list(COMMUNITY_CATEGORY_OPTIONS)
+                    for extra in sorted(category_seed - set(category_options)):
+                        category_options.append(extra)
+                    category_counts = Counter([post.get("category", "Other") for post in forum_posts])
+                    top_categories = [cat for cat, _ in category_counts.most_common(6)]
+                    quick_categories = ["All"] + [cat for cat in top_categories if cat in category_options]
+                    quick_current = st.session_state.get("market_quick_category", "All")
+                    quick_index = quick_categories.index(quick_current) if quick_current in quick_categories else 0
+                    st.radio(
+                        "Quick Categories",
+                        quick_categories,
+                        horizontal=True,
+                        index=quick_index,
+                        key="market_quick_category"
+                    )
+                    filter_container = st.container()
+                    with filter_container:
+                        st.markdown('<div id="sticky-filter-marker"></div>', unsafe_allow_html=True)
+                        filter_cols = st.columns([1.6, 1, 1, 1])
+                        with filter_cols[0]:
+                            search_term = st.text_input(
+                                "Search listings",
+                                placeholder="Search by title, description, or seller...",
+                                key="market_search_term"
+                            )
+                        with filter_cols[1]:
+                            type_filter = st.selectbox(
+                                "Type",
+                                ["All", "For Sale", "Auction", "Discussion"],
+                                key="market_type_filter"
+                            )
+                        with filter_cols[2]:
+                            category_filter = st.selectbox(
+                                "Category",
+                                ["All"] + category_options,
+                                key="market_category_filter"
+                            )
+                        with filter_cols[3]:
+                            status_filter = st.selectbox(
+                                "Status",
+                                ["All", "Active", "Ended", "Closed", "Sold", "Removed"],
+                                key="market_status_filter"
+                            )
+
+                        if "market_price_range_pending" in st.session_state:
+                            st.session_state.market_price_range = st.session_state.pop("market_price_range_pending")
+                        price_values = [value for value in (get_listing_price_value(post) for post in forum_posts) if value is not None]
+                        price_range = None
+                        sort_cols = st.columns([2, 1])
+                        with sort_cols[0]:
+                            if price_values:
+                                min_price = float(min(price_values))
+                                max_price = float(max(price_values))
+                                if "market_price_range" in st.session_state:
+                                    st.session_state.market_price_range = clamp_price_range(
+                                        st.session_state.market_price_range, min_price, max_price
+                                    )
+                                if min_price == max_price:
+                                    st.caption(f"Price range fixed at {currency_code} {min_price:,.2f}")
+                                    price_range = (min_price, max_price)
+                                else:
+                                    if "market_price_range" in st.session_state:
+                                        price_range = st.slider(
+                                            f"Price Range ({currency_code})",
+                                            min_value=min_price,
+                                            max_value=max_price,
+                                            key="market_price_range"
+                                        )
+                                    else:
+                                        price_range = st.slider(
+                                            f"Price Range ({currency_code})",
+                                            min_value=min_price,
+                                            max_value=max_price,
+                                            value=(min_price, max_price),
+                                            key="market_price_range"
+                                        )
+                        with sort_cols[1]:
+                            sort_option = st.selectbox(
+                                "Sort by",
+                                ["Newest", "Ending Soon", "Price (Low to High)", "Price (High to Low)"],
+                                key="market_sort_option"
+                            )
+
+                    components.html(
+                        """
+                        <script>
+                          (function() {
+                            const marker = window.parent.document.getElementById("sticky-filter-marker");
+                            if (!marker) return;
+                            const block = marker.closest('div[data-testid="stVerticalBlock"]');
+                            if (block) {
+                              block.classList.add("sticky-filter-block");
+                            }
+                          })();
+                        </script>
+                        """,
+                        height=0
+                    )
+
+                    quick_filter_cols = st.columns(6)
+                    with quick_filter_cols[0]:
+                        filter_watchlist = st.checkbox("Watchlist", key="market_filter_watchlist")
+                    with quick_filter_cols[1]:
+                        filter_photos = st.checkbox("Photos only", key="market_filter_photos")
+                    with quick_filter_cols[2]:
+                        filter_buy_now = st.checkbox("Buy Now", key="market_filter_buy_now")
+                    with quick_filter_cols[3]:
+                        filter_new = st.checkbox("New (7d)", key="market_filter_new")
+                    with quick_filter_cols[4]:
+                        filter_ending = st.checkbox("Ending Soon", key="market_filter_ending")
+                    with quick_filter_cols[5]:
+                        filter_near_me = st.checkbox("Near Me", key="market_filter_near_me")
+
+                    with st.expander("Saved Searches"):
+                        saved_searches = st.session_state.market_saved_searches
+                        saved_names = [s.get("name") for s in saved_searches if s.get("name")]
+                        selected_saved = st.selectbox(
+                            "Select saved search",
+                            ["Select..."] + saved_names,
+                            key="market_saved_search_select"
+                        )
+                        save_name = st.text_input("Save current search as", key="market_save_search_name")
+                        save_cols = st.columns(3)
+                        with save_cols[0]:
+                            if st.button("Save Search", key="market_save_search_btn"):
+                                if not save_name.strip():
+                                    st.error("Please enter a name for this search.")
+                                else:
+                                    payload = {
+                                        "name": save_name.strip(),
+                                        "search_term": search_term,
+                                        "type_filter": type_filter,
+                                        "category_filter": category_filter,
+                                        "status_filter": status_filter,
+                                        "sort_option": sort_option,
+                                        "quick_category": st.session_state.get("market_quick_category", "All"),
+                                        "price_range": list(price_range) if price_range else None,
+                                        "filter_watchlist": filter_watchlist,
+                                        "filter_photos": filter_photos,
+                                        "filter_buy_now": filter_buy_now,
+                                        "filter_new": filter_new,
+                                        "filter_ending": filter_ending,
+                                        "filter_near_me": filter_near_me,
+                                        "saved_at": datetime.now().isoformat()
+                                    }
+                                    saved_searches = [s for s in saved_searches if s.get("name") != payload["name"]]
+                                    saved_searches.insert(0, payload)
+                                    st.session_state.market_saved_searches = saved_searches
+                                    persist_market_saved_searches(db, user, saved_searches)
+                                    st.success("Search saved.")
+                        with save_cols[1]:
+                            if st.button("Load Search", key="market_load_search_btn"):
+                                if selected_saved and selected_saved != "Select...":
+                                    search = next((s for s in saved_searches if s.get("name") == selected_saved), None)
+                                    if search:
+                                        st.session_state.market_search_term = search.get("search_term", "")
+                                        st.session_state.market_type_filter = search.get("type_filter", "All")
+                                        st.session_state.market_category_filter = search.get("category_filter", "All")
+                                        st.session_state.market_status_filter = search.get("status_filter", "All")
+                                        st.session_state.market_sort_option = search.get("sort_option", "Newest")
+                                        st.session_state.market_quick_category = search.get("quick_category", "All")
+                                        st.session_state.market_filter_watchlist = bool(search.get("filter_watchlist", False))
+                                        st.session_state.market_filter_photos = bool(search.get("filter_photos", False))
+                                        st.session_state.market_filter_buy_now = bool(search.get("filter_buy_now", False))
+                                        st.session_state.market_filter_new = bool(search.get("filter_new", False))
+                                        st.session_state.market_filter_ending = bool(search.get("filter_ending", False))
+                                        st.session_state.market_filter_near_me = bool(search.get("filter_near_me", False))
+                                        if price_values and search.get("price_range"):
+                                            min_price = float(min(price_values))
+                                            max_price = float(max(price_values))
+                                            st.session_state.market_price_range_pending = clamp_price_range(
+                                                search.get("price_range"), min_price, max_price
+                                            )
+                                        st.rerun()
+                        with save_cols[2]:
+                            if st.button("Delete Search", key="market_delete_search_btn"):
+                                if selected_saved and selected_saved != "Select...":
+                                    saved_searches = [s for s in saved_searches if s.get("name") != selected_saved]
+                                    st.session_state.market_saved_searches = saved_searches
+                                    persist_market_saved_searches(db, user, saved_searches)
+                                    st.success("Search deleted.")
+                                    st.rerun()
+
+                        if selected_saved and selected_saved != "Select...":
+                            search = next((s for s in saved_searches if s.get("name") == selected_saved), None)
+                            if search:
+                                alerts_enabled = st.checkbox(
+                                    "Enable alerts for this search",
+                                    value=bool(search.get("alerts_enabled", True)),
+                                    key="market_saved_search_alerts_enabled"
+                                )
+                                email_enabled = st.checkbox(
+                                    "Email alerts for this search",
+                                    value=bool(search.get("email_alerts", False)),
+                                    key="market_saved_search_email_enabled"
+                                )
+                                if (
+                                    alerts_enabled != bool(search.get("alerts_enabled", True))
+                                    or email_enabled != bool(search.get("email_alerts", False))
+                                ):
+                                    search["alerts_enabled"] = alerts_enabled
+                                    search["email_alerts"] = email_enabled
+                                    persist_market_saved_searches(db, user, saved_searches)
+                                last_checked = search.get("last_checked", "Never")
+                                last_alerted = search.get("last_alerted", "Never")
+                                st.caption(f"Last checked: {last_checked} • Last alert: {last_alerted}")
+
+                    def apply_saved_search_filters(posts, search_state):
+                        s_term = (search_state.get("search_term") or "").strip().lower()
+                        s_type = search_state.get("type_filter", "All")
+                        s_category = search_state.get("category_filter", "All")
+                        s_status = search_state.get("status_filter", "All")
+                        s_sort = search_state.get("sort_option", "Newest")
+                        s_quick = search_state.get("quick_category", "All")
+                        s_price = search_state.get("price_range")
+                        s_watch = bool(search_state.get("filter_watchlist"))
+                        s_photos = bool(search_state.get("filter_photos"))
+                        s_buy_now = bool(search_state.get("filter_buy_now"))
+                        s_new = bool(search_state.get("filter_new"))
+                        s_ending = bool(search_state.get("filter_ending"))
+                        s_near = bool(search_state.get("filter_near_me"))
+
+                        if s_quick and s_quick != "All":
+                            s_category = s_quick
+
+                        results = []
+                        for post in posts:
+                            status = get_post_status(post)
+                            if s_type != "All" and post.get("listing_type") != s_type:
+                                continue
+                            if s_category != "All" and post.get("category") != s_category:
+                                continue
+                            if s_status != "All" and status != s_status:
+                                continue
+                            if s_term:
+                                hay = f"{post.get('title','')} {post.get('body','')} {post.get('created_by','')}".lower()
+                                if s_term not in hay:
+                                    continue
+                            if s_price:
+                                price_value = get_listing_price_value(post)
+                                if price_value is None:
+                                    continue
+                                if price_value < s_price[0] or price_value > s_price[1]:
+                                    continue
+                            if s_watch and post.get("id") not in st.session_state.market_watchlist:
+                                continue
+                            if s_photos and not get_post_images(post):
+                                continue
+                            if s_buy_now and not post.get("buy_now_price"):
+                                continue
+                            if s_new and not is_recent_listing(post, days=7):
+                                continue
+                            if s_ending:
+                                end_dt = get_auction_end_dt(post)
+                                if not end_dt:
+                                    continue
+                                if end_dt > forum_now() + timedelta(days=2):
+                                    continue
+                            if s_near:
+                                user_country = get_country_name(get_country_code(user_settings)).lower()
+                                post_country = str(post.get("location", "")).lower()
+                                if user_country and user_country not in post_country:
+                                    continue
+                            results.append((status, post))
+
+                        if s_sort == "Ending Soon":
+                            results.sort(key=lambda pair: get_auction_end_dt(pair[1]) or datetime.max)
+                        elif s_sort == "Price (Low to High)":
+                            results.sort(key=lambda pair: get_listing_price_value(pair[1]) if get_listing_price_value(pair[1]) is not None else float("inf"))
+                        elif s_sort == "Price (High to Low)":
+                            results.sort(key=lambda pair: get_listing_price_value(pair[1]) if get_listing_price_value(pair[1]) is not None else -1, reverse=True)
+                        else:
+                            results.sort(key=lambda pair: parse_forum_date(pair[1].get("created_at", "")), reverse=True)
+                        return results
+
+                    def run_saved_search_alerts():
+                        alerts = []
+                        updated = False
+                        saved_searches = st.session_state.market_saved_searches
+                        if not saved_searches:
+                            return alerts, updated
+                        now_iso = datetime.now().isoformat()
+                        for search in saved_searches:
+                            if not search.get("alerts_enabled", True):
+                                continue
+                            results = apply_saved_search_filters(forum_posts, search)
+                            result_ids = [post.get("id") for _, post in results if post.get("id")]
+                            last_ids = set(search.get("last_result_ids") or [])
+                            new_ids = [pid for pid in result_ids if pid not in last_ids]
+                            search["last_result_ids"] = result_ids[:200]
+                            search["last_checked"] = now_iso
+                            updated = True
+                            if new_ids:
+                                alerts.append({
+                                    "name": search.get("name"),
+                                    "count": len(new_ids),
+                                    "sample": results[:3]
+                                })
+                                search["last_alerted"] = now_iso
+                                if user_settings.get("market_alerts_email_enabled") and search.get("email_alerts"):
+                                    subject = f"WealthPulse Alert: {search.get('name')} ({len(new_ids)} new)"
+                                    listing_lines = []
+                                    for _, post in results[:5]:
+                                        listing_lines.append(f"- {post.get('title')} ({post.get('listing_type')})")
+                                    body = "New listings matched your saved search:\n" + "\n".join(listing_lines)
+                                    send_alert_email(user_settings, subject, body)
+                        if updated:
+                            st.session_state.market_saved_searches = saved_searches
+                            persist_market_saved_searches(db, user, saved_searches)
+                        return alerts, updated
+
+                    quick_category = st.session_state.get("market_quick_category", "All")
+                    if quick_category != "All":
+                        category_filter = quick_category
+
+                    filtered = []
+                    for post in forum_posts:
+                        status = get_post_status(post)
+                        if type_filter != "All" and post.get("listing_type") != type_filter:
+                            continue
+                        if category_filter != "All" and post.get("category") != category_filter:
+                            continue
+                        if status_filter != "All" and status != status_filter:
+                            continue
+                        if search_term:
+                            hay = f"{post.get('title','')} {post.get('body','')} {post.get('created_by','')}".lower()
+                            if search_term.lower() not in hay:
+                                continue
+                        if price_range:
+                            price_value = get_listing_price_value(post)
+                            if price_value is None:
+                                continue
+                            if price_value < price_range[0] or price_value > price_range[1]:
+                                continue
+                        if filter_watchlist and post.get("id") not in st.session_state.market_watchlist:
+                            continue
+                        if filter_photos and not get_post_images(post):
+                            continue
+                        if filter_buy_now and not post.get("buy_now_price"):
+                            continue
+                        if filter_new and not is_recent_listing(post, days=7):
+                            continue
+                        if filter_ending:
+                            end_dt = get_auction_end_dt(post)
+                            if not end_dt:
+                                continue
+                            if end_dt > forum_now() + timedelta(days=2):
+                                continue
+                        if filter_near_me:
+                            user_country = get_country_name(get_country_code(user_settings)).lower()
+                            post_country = str(post.get("location", "")).lower()
+                            if user_country and user_country not in post_country:
+                                continue
+                        filtered.append((status, post))
+
+                    if sort_option == "Ending Soon":
+                        filtered.sort(
+                            key=lambda pair: get_auction_end_dt(pair[1]) or datetime.max
+                        )
+                    elif sort_option == "Price (Low to High)":
+                        filtered.sort(
+                            key=lambda pair: get_listing_price_value(pair[1]) if get_listing_price_value(pair[1]) is not None else float("inf")
+                        )
+                    elif sort_option == "Price (High to Low)":
+                        filtered.sort(
+                            key=lambda pair: get_listing_price_value(pair[1]) if get_listing_price_value(pair[1]) is not None else -1,
+                            reverse=True
+                        )
                     else:
-                        for report in reports:
-                            report_id = report.get("id")
-                            post_id = report.get("post_id")
-                            with st.expander(f"Report on {post_id} by {report.get('reported_by', 'User')}"):
-                                st.caption(report.get("created_at", ""))
-                                st.write(report.get("reason", ""))
-                                mod_cols = st.columns(3)
-                                with mod_cols[0]:
-                                    if st.button("Remove Post", key=f"mod_remove_{report_id}"):
-                                        _, err = community_update_post(community_settings, db, post_id, {"status": "Removed"})
+                        filtered.sort(key=lambda pair: parse_forum_date(pair[1].get("created_at", "")), reverse=True)
+
+                    alerts_enabled = bool(user_settings.get("market_alerts_enabled", True))
+                    alert_interval = int(user_settings.get("market_alerts_interval", 180))
+                    if alerts_enabled:
+                        last_check = st.session_state.get("market_alerts_last_check", 0.0)
+                        if time.time() - last_check >= alert_interval:
+                            alert_results, _ = run_saved_search_alerts()
+                            st.session_state.market_alerts_last_check = time.time()
+                        else:
+                            alert_results = []
+                        if alert_results:
+                            st.markdown("#### Saved Search Alerts")
+                            for alert in alert_results:
+                                st.info(f"{alert['name']}: {alert['count']} new listing(s) matched.")
+                            if user_settings.get("market_alerts_push_enabled"):
+                                signature = build_alert_signature(alert_results)
+                                if signature and signature != st.session_state.get("market_alerts_last_push_signature"):
+                                    st.session_state.market_alerts_last_push_signature = signature
+                                    trigger_browser_notifications(alert_results)
+
+                    if not filtered:
+                        st.info("No listings yet. Create the first post!")
+                    else:
+                        stats_cols = st.columns(4)
+                        total_count = len(forum_posts)
+                        active_count = sum(1 for status, _ in filtered if status == "Active")
+                        auction_count = sum(1 for _, post in filtered if post.get("listing_type") == "Auction")
+                        ending_soon_count = sum(
+                            1 for _, post in filtered
+                            if post.get("listing_type") == "Auction"
+                            and (get_auction_end_dt(post) and get_auction_end_dt(post) <= forum_now() + timedelta(days=2))
+                        )
+                        stats_cols[0].metric("Listings", f"{total_count}")
+                        stats_cols[1].metric("Active", f"{active_count}")
+                        stats_cols[2].metric("Auctions", f"{auction_count}")
+                        stats_cols[3].metric("Ending Soon", f"{ending_soon_count}")
+
+                        featured = sorted(
+                            filtered,
+                            key=lambda pair: get_listing_price_value(pair[1]) or 0.0,
+                            reverse=True
+                        )[:3]
+                        if featured:
+                            st.markdown("#### Featured Picks")
+                            feat_cols = st.columns(len(featured))
+                            for idx, (status, post) in enumerate(featured):
+                                with feat_cols[idx]:
+                                    render_marketplace_card(post, status, "featured")
+
+                        post_ids = [post.get("id") for _, post in filtered]
+                        if st.session_state.market_selected_post_id not in post_ids:
+                            st.session_state.market_selected_post_id = post_ids[0]
+
+                        card_cols = st.columns(3)
+                        for idx, (status, post) in enumerate(filtered):
+                            with card_cols[idx % 3]:
+                                render_marketplace_card(post, status, "grid")
+
+                        selected_post = None
+                        selected_status = None
+                        for status, post in filtered:
+                            if post.get("id") == st.session_state.market_selected_post_id:
+                                selected_post = post
+                                selected_status = status
+                                break
+                        st.markdown("---")
+                        if selected_post:
+                            render_listing_detail_panel(selected_post, selected_status or get_post_status(selected_post))
+                        else:
+                            st.info("Select a listing to view details.")
+
+            with forum_tabs[1]:
+                st.markdown("### Watchlist")
+                watchlist_items = [post for post in forum_posts if post.get("id") in st.session_state.market_watchlist]
+                if not watchlist_items:
+                    st.info("No watchlist items yet. Tap Watch on a listing to save it here.")
+                else:
+                    watchlist_items.sort(key=lambda post: parse_forum_date(post.get("created_at", "")), reverse=True)
+                    watchlist_pairs = [(get_post_status(post), post) for post in watchlist_items]
+                    watchlist_cols = st.columns(3)
+                    for idx, (status, post) in enumerate(watchlist_pairs):
+                        with watchlist_cols[idx % 3]:
+                            render_marketplace_card(post, status, "watchlist")
+                    watch_ids = [post.get("id") for _, post in watchlist_pairs]
+                    selected_id = st.session_state.get("market_selected_post_id")
+                    if selected_id not in watch_ids:
+                        st.session_state.market_selected_post_id = watch_ids[0]
+                    selected_post = None
+                    selected_status = None
+                    for status, post in watchlist_pairs:
+                        if post.get("id") == st.session_state.market_selected_post_id:
+                            selected_post = post
+                            selected_status = status
+                            break
+                    st.markdown("---")
+                    if selected_post:
+                        render_listing_detail_panel(selected_post, selected_status or get_post_status(selected_post))
+
+            with forum_tabs[2]:
+                st.markdown("### Create Listing")
+                if not community_ready:
+                    st.info("Community is not ready yet. Configure Supabase in the setup section at the bottom of this page.")
+                elif community_is_banned(community_settings, db, user):
+                    st.error("Your account is suspended from posting.")
+                else:
+                    st.markdown("**Community Rules**")
+                    for rule in COMMUNITY_RULES:
+                        st.markdown(f"- {rule}")
+                    st.markdown("**Marketplace Disclaimer**")
+                    st.caption(
+                        "Transactions are arranged directly between users. Buyers and sellers must contact each other "
+                        "to settle payment and delivery outside of the app using their preferred method. "
+                        "We provide the community forum only and take no responsibility for sales, disputes, "
+                        "or fraudulent activity."
+                    )
+                    prefill = st.checkbox("Prefill from my portfolio", value=bool(portfolio))
+                    prefill_asset = None
+                    if prefill and portfolio:
+                        asset_options = [f"{i+1}. {asset['name']} ({asset['type']})" for i, asset in enumerate(portfolio)]
+                        selected_asset_label = st.selectbox("Choose asset", asset_options)
+                        selected_index = int(selected_asset_label.split(".")[0]) - 1
+                        if 0 <= selected_index < len(portfolio):
+                            prefill_asset = portfolio[selected_index]
+
+                    default_title = prefill_asset.get("name", "") if prefill_asset else ""
+                    default_category = prefill_asset.get("type", "Other") if prefill_asset else "Other"
+                    default_body = ""
+                    default_price = 0.0
+                    if prefill_asset:
+                        default_body = f"{prefill_asset.get('type')} in {prefill_asset.get('condition')} condition. Qty {prefill_asset.get('qty', 1)}."
+                        default_price = to_display_currency(ai_valuation(prefill_asset)[0], currency_rate)
+
+                    category_search = st.text_input(
+                        "Filter categories (optional)",
+                        placeholder="Type to filter categories (e.g., bullion, coins, trading cards)",
+                        key="market_category_search"
+                    )
+
+                    with st.form("create_listing_form"):
+                        listing_type = st.selectbox("Listing Type", ["For Sale", "Auction", "Discussion"])
+                        category_list = list(COMMUNITY_CATEGORY_OPTIONS)
+                        extra_categories = [default_category] + [asset.get("type", "Other") for asset in portfolio]
+                        for extra in sorted({c for c in extra_categories if c} - set(category_list)):
+                            category_list.append(extra)
+                        category_list = filter_category_options(category_list, category_search)
+                        category = st.selectbox(
+                            "Category",
+                            category_list,
+                            index=category_list.index(default_category) if default_category in category_list else 0
+                        )
+                        title = st.text_input("Title", value=default_title)
+                        description = st.text_area("Description", value=default_body, height=120)
+                        grading_type = grading_type_for_category(category)
+                        grading_company = None
+                        grading_grade = None
+                        if grading_type:
+                            st.markdown("#### Grading (optional)")
+                            if supports_grading:
+                                if grading_type == "coin":
+                                    company_options = COIN_GRADING_COMPANIES
+                                    grade_options = COIN_GRADE_OPTIONS
+                                else:
+                                    company_options = CARD_GRADING_COMPANIES
+                                    grade_options = CARD_GRADE_OPTIONS
+                                grading_company = st.selectbox(
+                                    "Grading Company",
+                                    ["Ungraded / None"] + company_options,
+                                    key="listing_grading_company"
+                                )
+                                grading_grade = st.selectbox(
+                                    "Grade",
+                                    grade_options,
+                                    key="listing_grading_grade"
+                                )
+                                if grading_company == "Ungraded / None":
+                                    grading_company = None
+                                if grading_grade == "Ungraded":
+                                    grading_grade = None
+                            else:
+                                st.caption("Grading fields require a schema update. Run the migration helper below.")
+                        listing_images = []
+                        if supports_images:
+                            listing_images = st.file_uploader(
+                                f"Listing Photos (max {MAX_LISTING_IMAGES})",
+                                type=["jpg", "jpeg", "png"],
+                                accept_multiple_files=True
+                            )
+                            if listing_images:
+                                image_error = validate_listing_images(listing_images)
+                                if image_error:
+                                    st.warning(image_error)
+                                    listing_images = listing_images[:MAX_LISTING_IMAGES]
+                            if listing_images:
+                                preview_cols = st.columns(min(len(listing_images), 5))
+                                for idx, img in enumerate(listing_images[:5]):
+                                    with preview_cols[idx]:
+                                        st.image(img, width=140)
+                        else:
+                            st.caption("Photo uploads require a schema update. Run the migration helper below.")
+                        default_country = get_country_name(get_country_code(user_settings))
+                        location = st.text_input(
+                            "Country (required)",
+                            value=default_country,
+                            help="Enter the country where the item is located. Add city/region in the description if needed."
+                        )
+                        price = None
+                        starting_bid = None
+                        min_increment = None
+                        reserve_amount = None
+                        buy_now_price = None
+                        end_date = None
+                        if listing_type == "For Sale":
+                            price = st.number_input(f"Price ({currency_code})", min_value=0.0, value=float(default_price), step=1.0)
+                        elif listing_type == "Auction":
+                            starting_bid = st.number_input(f"Starting Bid ({currency_code})", min_value=0.0, value=float(default_price), step=1.0)
+                            min_increment = st.number_input(f"Minimum Increment ({currency_code})", min_value=0.0, value=10.0, step=1.0)
+                            if supports_reserve:
+                                reserve_amount = st.number_input(f"Reserve Amount ({currency_code})", min_value=0.0, value=0.0, step=1.0)
+                            else:
+                                st.caption("Reserve amounts require a schema update. Run the migration helper.")
+                            if supports_buy_now:
+                                buy_now_price = st.number_input(f"Buy Now Price ({currency_code})", min_value=0.0, value=0.0, step=1.0)
+                            else:
+                                st.caption("Buy Now requires a schema update. Run the migration helper.")
+                            end_date = st.date_input("Auction End Date", value=datetime.now().date() + timedelta(days=7))
+
+                        agree_rules = st.checkbox("I agree to the Community Rules above.")
+                        agree_terms = st.checkbox("I agree to the Marketplace Disclaimer above.")
+                        submit_listing = st.form_submit_button("Post Listing")
+
+                    if submit_listing:
+                        if not title.strip():
+                            st.error("Title is required.")
+                        elif not location.strip():
+                            st.error("Country is required.")
+                        elif not description.strip():
+                            st.error("Description is required.")
+                        elif validate_community_text(f"{title} {description} {location}"):
+                            st.error("Your listing contains content that violates the Community Rules.")
+                        elif listing_images and validate_listing_images(listing_images):
+                            st.error(validate_listing_images(listing_images))
+                        elif not agree_rules:
+                            st.error("You must agree to the Community Rules to post a listing.")
+                        elif not agree_terms:
+                            st.error("You must agree to the Marketplace Disclaimer to post a listing.")
+                        elif listing_type == "Auction" and supports_reserve and reserve_amount and starting_bid is not None and reserve_amount < starting_bid:
+                            st.error("Reserve amount should be equal to or higher than the starting bid.")
+                        elif listing_type == "Auction" and supports_buy_now and buy_now_price and reserve_amount and buy_now_price < reserve_amount:
+                            st.error("Buy Now price should be equal to or higher than the reserve.")
+                        else:
+                            encoded_images = encode_uploaded_images(listing_images) if (supports_images and listing_images) else []
+                            post_payload = {
+                                "id": secrets.token_hex(6),
+                                "title": title.strip(),
+                                "body": description.strip(),
+                                "category": category,
+                                "listing_type": listing_type,
+                                "price": float(price) if price is not None else None,
+                                "currency": currency_code,
+                                "location": location.strip(),
+                                "created_by": user,
+                                "created_at": datetime.now().isoformat(),
+                                "status": "Active",
+                                "auction_starting_bid": float(starting_bid) if starting_bid is not None else None,
+                                "auction_min_increment": float(min_increment) if min_increment is not None else None,
+                                "reserve_amount": float(reserve_amount) if supports_reserve and reserve_amount and reserve_amount > 0 else None,
+                                "buy_now_price": float(buy_now_price) if supports_buy_now and buy_now_price and buy_now_price > 0 else None,
+                                "auction_end_date": end_date.isoformat() if end_date else None,
+                                "images": encoded_images or None
+                            }
+                            if supabase_auth_required(community_settings) and supports_owner_id and auth_user_id:
+                                post_payload["owner_id"] = auth_user_id
+                            if supports_grading:
+                                if grading_company:
+                                    post_payload["grading_company"] = grading_company
+                                if grading_grade:
+                                    post_payload["grading_grade"] = grading_grade
+                            if not post_payload.get("reserve_amount"):
+                                post_payload.pop("reserve_amount", None)
+                            if not post_payload.get("buy_now_price"):
+                                post_payload.pop("buy_now_price", None)
+                            if not post_payload.get("images"):
+                                post_payload.pop("images", None)
+                            if supabase_enabled(community_settings):
+                                post_payload.pop("id", None)
+                            _, err = community_create_post(community_settings, db, post_payload)
+                            if err:
+                                st.error(err)
+                            else:
+                                save_data(db)
+                                st.success("Listing posted.")
+                                request_scroll_to_top()
+                                st.rerun()
+
+            with forum_tabs[3]:
+                st.markdown("### My Listings")
+                if not community_ready:
+                    st.info("Community is not ready yet. Configure Supabase in the setup section at the bottom of this page.")
+                else:
+                    my_posts = [post for post in forum_posts if post.get("created_by") == user]
+                    if not my_posts:
+                        st.info("You haven't posted anything yet.")
+                    else:
+                        my_posts.sort(key=lambda post: parse_forum_date(post.get("created_at", "")), reverse=True)
+                        for post in my_posts:
+                            status = get_post_status(post)
+                            header = f"{post.get('title', 'Listing')} • {post.get('listing_type')} • {status}"
+                            with st.expander(header):
+                                st.write(post.get("body", ""))
+                                st.caption(f"Posted {post.get('created_at','')}")
+                                post_images = get_post_images(post)
+                                if post_images:
+                                    image_cols = st.columns(min(len(post_images), 5))
+                                    for idx, img in enumerate(post_images):
+                                        with image_cols[idx]:
+                                            st.image(img, width=160)
+                                if post.get("listing_type") == "Auction":
+                                    reserve_amount = get_reserve_amount(post) if supports_reserve else None
+                                    buy_now_price = get_buy_now_price(post) if supports_buy_now else None
+                                    _, _, end_date = get_auction_fields(post)
+                                    time_left_label = format_time_left(end_date, user_settings)
+                                    if time_left_label:
+                                        st.caption(time_left_label)
+                                    if reserve_amount:
+                                        st.caption(f"Reserve: {post.get('currency', currency_code)} {float(reserve_amount):,.2f}")
+                                    if buy_now_price:
+                                        st.caption(f"Buy Now: {post.get('currency', currency_code)} {float(buy_now_price):,.2f}")
+                                if st.button("Edit Listing", key=f"edit_listing_open_my_{post.get('id')}"):
+                                    st.session_state.edit_listing_id = post.get("id")
+                                    st.session_state.edit_listing_origin = "my"
+                                    request_scroll_to_top()
+                                    st.rerun()
+                                sale_cols = st.columns(3)
+                                with sale_cols[0]:
+                                    if st.button("Close Listing", key=f"close_listing_{post.get('id')}"):
+                                        _, err = community_update_post(community_settings, db, post.get("id"), {"status": "Closed"})
                                         if err:
                                             st.error(err)
                                         else:
-                                            st.success("Post removed.")
+                                            st.success("Listing closed.")
                                             st.rerun()
-                                with mod_cols[1]:
-                                    if st.button("Clear Report", key=f"mod_clear_{report_id}"):
-                                        _, err = community_clear_report(community_settings, db, report_id)
+                                with sale_cols[1]:
+                                    default_sold_price = float(post.get("price") or 0.0)
+                                    if post.get("listing_type") == "Auction":
+                                        bids, _ = community_get_bids(community_settings, db, post.get("id"))
+                                        if bids:
+                                            default_sold_price = max([b.get("amount", 0.0) for b in bids])
+                                    sold_price = st.number_input(
+                                        f"Sold Price ({post.get('currency', currency_code)})",
+                                        min_value=0.0,
+                                        value=float(default_sold_price),
+                                        step=1.0,
+                                        key=f"sold_price_{post.get('id')}"
+                                    )
+                                    if st.button("Mark as Sold", key=f"mark_sold_{post.get('id')}"):
+                                        _, err = community_update_post(community_settings, db, post.get("id"), {
+                                            "status": "Sold",
+                                            "sold_price": float(sold_price),
+                                            "sold_at": datetime.now().isoformat()
+                                        })
                                         if err:
                                             st.error(err)
                                         else:
-                                            st.success("Report cleared.")
+                                            st.success("Listing marked as sold.")
                                             st.rerun()
-                                with mod_cols[2]:
-                                    target_user = report.get("reported_user") or ""
-                                    if st.button("Ban User", key=f"mod_ban_{report_id}"):
-                                        if not target_user:
-                                            st.error("No user attached to report.")
+                                with sale_cols[2]:
+                                    if st.button("Delete Listing", key=f"delete_listing_{post.get('id')}"):
+                                        _, err = community_delete_post(community_settings, db, post.get("id"))
+                                        if err:
+                                            st.error(err)
                                         else:
-                                            _, err = community_set_ban(community_settings, db, target_user, "Reported in Community Market")
+                                            st.success("Listing deleted.")
+                                            st.rerun()
+
+            with forum_tabs[4]:
+                st.markdown("### Private Messages")
+                if not community_ready:
+                    st.info("Community is not ready yet. Configure Supabase in the setup section at the bottom of this page.")
+                else:
+                    msg_cols = st.columns(2)
+                    with msg_cols[0]:
+                        st.markdown("**Inbox**")
+                        inbox, inbox_err = community_get_messages(community_settings, db, user, box="inbox")
+                        if inbox_err:
+                            st.error(inbox_err)
+                        else:
+                            for msg in inbox[:10]:
+                                status = "Unread" if not msg.get("read_at") else "Read"
+                                with st.expander(f"From {msg.get('sender')} • {status}"):
+                                    st.caption(msg.get("created_at", ""))
+                                    st.write(msg.get("subject", ""))
+                                    st.write(msg.get("body", ""))
+                                    if not msg.get("read_at") and msg.get("id"):
+                                        if st.button("Mark Read", key=f"mark_read_{msg.get('id')}"):
+                                            _, err = community_mark_message_read(community_settings, db, msg.get("id"))
                                             if err:
                                                 st.error(err)
                                             else:
-                                                st.success("User banned.")
+                                                st.success("Marked as read.")
                                                 st.rerun()
-
-                    st.markdown("### Moderators")
-                    if role == "admin":
-                        existing_roles, _ = community_get_roles(community_settings, db)
-                        st.write("Current moderators:")
-                        for entry in existing_roles:
-                            st.write(f"{entry.get('username')} — {entry.get('role')}")
-                        with st.form("add_moderator_form"):
-                            mod_user = st.text_input("Username")
-                            mod_role = st.selectbox("Role", ["moderator", "admin"])
-                            submit_mod = st.form_submit_button("Save Role")
-                        if submit_mod and mod_user.strip():
-                            _, err = community_set_role(community_settings, db, mod_user.strip(), mod_role)
-                            if err:
-                                st.error(err)
-                            else:
-                                st.success("Role updated.")
-                                st.rerun()
-                        with st.form("remove_moderator_form"):
-                            remove_user = st.text_input("Remove Username")
-                            remove_submit = st.form_submit_button("Remove Role")
-                        if remove_submit and remove_user.strip():
-                            _, err = community_remove_role(community_settings, db, remove_user.strip())
-                            if err:
-                                st.error(err)
-                            else:
-                                st.success("Role removed.")
-                                st.rerun()
-
-        st.markdown("---")
-        st.subheader("Community Market")
-        policy_mode = (user_settings.get("community_policy_mode") or "unknown").lower()
-        app_access_open = not supabase_auth_required(community_settings)
-        app_access_label = "App: Open Access" if app_access_open else "App: Sign-in Required"
-        app_badge_class = "open" if app_access_open else "secure"
-        policy_label_map = {
-            "open": "Supabase: Open",
-            "auth": "Supabase: Auth Required",
-            "service": "Supabase: Service Role",
-            "unknown": "Supabase: Not Set"
-        }
-        policy_badge_class = policy_mode if policy_mode in {"open", "auth", "service"} else "unknown"
-        policy_badge_style = "secure" if policy_badge_class in {"auth", "service"} else "open" if policy_badge_class == "open" else "unknown"
-        st.markdown(
-            f"""
-            <div class="community-badges">
-                <div class="community-badge {app_badge_class}">{app_access_label}</div>
-                <div class="community-badge {policy_badge_style}">{policy_label_map.get(policy_badge_class, 'Supabase: Not Set')}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        if supabase_connected:
-            st.caption("Connected to Supabase community backend (multi-device).")
-        else:
-            st.warning("Connect Supabase in Settings to enable the multi-device community. Using local mode until configured.")
-
-        if supabase_connected:
-            if not schema_ok:
-                if is_supabase_missing_table_error(schema_err):
-                    st.error("Community backend not set up yet (tables missing).")
-                    st.info("Run the SQL in `supabase_community_schema.sql` using the Supabase SQL editor, then refresh.")
-                    with st.expander("Show Supabase schema SQL"):
-                        schema_sql = load_community_schema_sql()
-                        if schema_sql:
-                            st.code(schema_sql, language="sql")
+                    with msg_cols[1]:
+                        st.markdown("**Send Message**")
+                        if is_banned:
+                            st.info("You cannot send messages while suspended.")
                         else:
-                            st.caption("Schema file not found in the app directory.")
-                else:
-                    st.error(f"Community backend error: {schema_err}")
+                            with st.form("send_message_form"):
+                                recipient = st.text_input("Recipient Username")
+                                subject = st.text_input("Subject")
+                                body = st.text_area("Message", height=120)
+                                send_msg = st.form_submit_button("Send")
+                            if send_msg:
+                                if not recipient or not body.strip():
+                                    st.error("Recipient and message are required.")
+                                elif validate_community_text(f"{subject} {body}"):
+                                    st.error("Your message violates the Community Rules.")
+                                else:
+                                    recipient_name = recipient.strip()
+                                    recipient_id = community_lookup_user_auth_id(community_settings, recipient_name) if supabase_auth_required(community_settings) else None
+                                    if supabase_auth_required(community_settings) and not recipient_id:
+                                        st.error("Recipient has not linked a Community account yet.")
+                                    else:
+                                        _, err = community_send_message(community_settings, db, {
+                                            "sender": user,
+                                            "recipient": recipient_name,
+                                            "sender_id": auth_user_id if supabase_auth_required(community_settings) else None,
+                                            "recipient_id": recipient_id,
+                                            "subject": subject.strip(),
+                                            "body": body.strip(),
+                                            "created_at": datetime.now().isoformat(),
+                                            "read_at": None
+                                        })
+                                    if err:
+                                        st.error(err)
+                                    else:
+                                        st.success("Message sent.")
+                                        st.rerun()
+                        st.markdown("**Sent**")
+                        sent_messages, sent_err = community_get_messages(community_settings, db, user, box="sent")
+                        if sent_err:
+                            st.error(sent_err)
+                        else:
+                            for msg in sent_messages[:10]:
+                                with st.expander(f"To {msg.get('recipient')}"):
+                                    st.caption(msg.get("created_at", ""))
+                                    st.write(msg.get("subject", ""))
+                                    st.write(msg.get("body", ""))
 
-            st.markdown("### Setup Checklist")
-            st.caption("Run the SQL schema and use this checklist to confirm your community tables are live.")
-            if "community_checklist_results" not in st.session_state:
-                st.session_state.community_checklist_results = None
-            checklist_tables = [
-                "community_users",
-                "community_posts",
-                "community_comments",
-                "community_bids",
-                "community_offers",
-                "community_messages",
-                "community_roles",
-                "community_bans",
-                "community_reports",
-                "wealthpulse_users"
-            ]
-            if st.button("Run Setup Checklist", key="community_setup_checklist"):
-                checklist_results = supabase_check_tables(
-                    community_settings,
-                    checklist_tables,
-                    use_service_key=community_use_service_role(community_settings),
-                    auth_token=community_auth_token(community_settings)
-                )
-                st.session_state.community_checklist_results = {
-                    "results": checklist_results,
-                    "checked_at": datetime.now().isoformat()
-                }
-            if st.session_state.community_checklist_results:
-                render_checklist_results(
-                    st.session_state.community_checklist_results["results"],
-                    st.session_state.community_checklist_results.get("checked_at")
-                )
+            if is_mod:
+                with forum_tabs[5]:
+                    if not community_ready:
+                        st.info("Community is not ready yet. Configure Supabase in the setup section at the bottom of this page.")
+                    else:
+                        if supabase_enabled(community_settings) and not community_use_service_role(community_settings):
+                            st.warning("Moderation actions require the Supabase service role key. Add it in secrets to enable bans and report management.")
+                        st.markdown("### Moderation")
+                        reports, report_err = community_get_reports(community_settings, db)
+                        if report_err:
+                            st.error(report_err)
+                        if not reports:
+                            st.info("No reports yet.")
+                        else:
+                            for report in reports:
+                                report_id = report.get("id")
+                                post_id = report.get("post_id")
+                                with st.expander(f"Report on {post_id} by {report.get('reported_by', 'User')}"):
+                                    st.caption(report.get("created_at", ""))
+                                    st.write(report.get("reason", ""))
+                                    mod_cols = st.columns(3)
+                                    with mod_cols[0]:
+                                        if st.button("Remove Post", key=f"mod_remove_{report_id}"):
+                                            _, err = community_update_post(community_settings, db, post_id, {"status": "Removed"})
+                                            if err:
+                                                st.error(err)
+                                            else:
+                                                st.success("Post removed.")
+                                                st.rerun()
+                                    with mod_cols[1]:
+                                        if st.button("Clear Report", key=f"mod_clear_{report_id}"):
+                                            _, err = community_clear_report(community_settings, db, report_id)
+                                            if err:
+                                                st.error(err)
+                                            else:
+                                                st.success("Report cleared.")
+                                                st.rerun()
+                                    with mod_cols[2]:
+                                        target_user = report.get("reported_user") or ""
+                                        if st.button("Ban User", key=f"mod_ban_{report_id}"):
+                                            if not target_user:
+                                                st.error("No user attached to report.")
+                                            else:
+                                                _, err = community_set_ban(community_settings, db, target_user, "Reported in Community Market")
+                                                if err:
+                                                    st.error(err)
+                                                else:
+                                                    st.success("User banned.")
+                                                    st.rerun()
+
+                        st.markdown("### Moderators")
+                        if role == "admin":
+                            existing_roles, _ = community_get_roles(community_settings, db)
+                            st.write("Current moderators:")
+                            for entry in existing_roles:
+                                st.write(f"{entry.get('username')} — {entry.get('role')}")
+                            with st.form("add_moderator_form"):
+                                mod_user = st.text_input("Username")
+                                mod_role = st.selectbox("Role", ["moderator", "admin"])
+                                submit_mod = st.form_submit_button("Save Role")
+                            if submit_mod and mod_user.strip():
+                                _, err = community_set_role(community_settings, db, mod_user.strip(), mod_role)
+                                if err:
+                                    st.error(err)
+                                else:
+                                    st.success("Role updated.")
+                                    st.rerun()
+                            with st.form("remove_moderator_form"):
+                                remove_user = st.text_input("Remove Username")
+                                remove_submit = st.form_submit_button("Remove Role")
+                            if remove_submit and remove_user.strip():
+                                _, err = community_remove_role(community_settings, db, remove_user.strip())
+                                if err:
+                                    st.error(err)
+                                else:
+                                    st.success("Role removed.")
+                                    st.rerun()
+
+            st.markdown("---")
+            st.subheader("Community Market")
+            policy_mode = (user_settings.get("community_policy_mode") or "unknown").lower()
+            app_access_open = not supabase_auth_required(community_settings)
+            app_access_label = "App: Open Access" if app_access_open else "App: Sign-in Required"
+            app_badge_class = "open" if app_access_open else "secure"
+            policy_label_map = {
+                "open": "Supabase: Open",
+                "auth": "Supabase: Auth Required",
+                "service": "Supabase: Service Role",
+                "unknown": "Supabase: Not Set"
+            }
+            policy_badge_class = policy_mode if policy_mode in {"open", "auth", "service"} else "unknown"
+            policy_badge_style = "secure" if policy_badge_class in {"auth", "service"} else "open" if policy_badge_class == "open" else "unknown"
+            st.markdown(
+                f"""
+                <div class="community-badges">
+                    <div class="community-badge {app_badge_class}">{app_access_label}</div>
+                    <div class="community-badge {policy_badge_style}">{policy_label_map.get(policy_badge_class, 'Supabase: Not Set')}</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            if supabase_connected:
+                st.caption("Connected to Supabase community backend (multi-device).")
             else:
-                st.info("Click 'Run Setup Checklist' after running the SQL to confirm tables are available.")
+                st.warning("Connect Supabase in Settings to enable the multi-device community. Using local mode until configured.")
 
-            test_cols = st.columns([1, 3])
-            with test_cols[0]:
-                if st.button("Test Supabase Connection", key="community_supabase_test"):
-                    ok, err = supabase_check_table(
+            if supabase_connected:
+                if not schema_ok:
+                    if is_supabase_missing_table_error(schema_err):
+                        st.error("Community backend not set up yet (tables missing).")
+                        st.info("Run the SQL in `supabase_community_schema.sql` using the Supabase SQL editor, then refresh.")
+                        with st.expander("Show Supabase schema SQL"):
+                            schema_sql = load_community_schema_sql()
+                            if schema_sql:
+                                st.code(schema_sql, language="sql")
+                            else:
+                                st.caption("Schema file not found in the app directory.")
+                    else:
+                        st.error(f"Community backend error: {schema_err}")
+
+                st.markdown("### Setup Checklist")
+                st.caption("Run the SQL schema and use this checklist to confirm your community tables are live.")
+                if "community_checklist_results" not in st.session_state:
+                    st.session_state.community_checklist_results = None
+                checklist_tables = [
+                    "community_users",
+                    "community_posts",
+                    "community_comments",
+                    "community_bids",
+                    "community_offers",
+                    "community_messages",
+                    "community_roles",
+                    "community_bans",
+                    "community_reports",
+                    "wealthpulse_users"
+                ]
+                if st.button("Run Setup Checklist", key="community_setup_checklist"):
+                    checklist_results = supabase_check_tables(
                         community_settings,
-                        "community_posts",
+                        checklist_tables,
                         use_service_key=community_use_service_role(community_settings),
                         auth_token=community_auth_token(community_settings)
                     )
-                    if ok:
-                        st.success("Supabase connection OK.")
-                    else:
-                        st.error(f"Supabase test failed: {err}")
-
-            st.markdown("### Migration Helper")
-            st.caption("Detect and generate SQL for new columns (reserve + buy now + images + grading + auth ownership fields).")
-            if "community_migration_results" not in st.session_state:
-                st.session_state.community_migration_results = None
-            if st.button("Check for missing columns", key="community_migration_check"):
-                migration_results = supabase_check_columns(
-                    community_settings,
-                    "community_posts",
-                    list(COMMUNITY_POSTS_EXTRA_COLUMNS.keys()),
-                    use_service_key=community_use_service_role(community_settings),
-                    auth_token=community_auth_token(community_settings)
-                )
-                st.session_state.community_migration_results = {
-                    "results": migration_results,
-                    "checked_at": datetime.now().isoformat()
-                }
-            if st.session_state.community_migration_results:
-                render_checklist_results(
-                    st.session_state.community_migration_results["results"],
-                    st.session_state.community_migration_results.get("checked_at")
-                )
-                st.session_state.community_column_support = {
-                    col: ok for col, ok, _ in st.session_state.community_migration_results["results"]
-                }
-                missing = [
-                    col for col, ok, err in st.session_state.community_migration_results["results"]
-                    if not ok and is_supabase_missing_column_error(err)
-                ]
-                if missing:
-                    st.info("Run this SQL in Supabase SQL Editor to add missing columns:")
-                    migration_sql = build_community_migration_sql(missing)
-                    st.code(migration_sql, language="sql")
-                    st.download_button(
-                        "Download migration SQL",
-                        data=migration_sql,
-                        file_name="community_posts_migration.sql"
+                    st.session_state.community_checklist_results = {
+                        "results": checklist_results,
+                        "checked_at": datetime.now().isoformat()
+                    }
+                if st.session_state.community_checklist_results:
+                    render_checklist_results(
+                        st.session_state.community_checklist_results["results"],
+                        st.session_state.community_checklist_results.get("checked_at")
                     )
-                    st.caption("After running the SQL, refresh this page and re-run the column check.")
                 else:
-                    st.success("No missing columns detected.")
-# ==============================
+                    st.info("Click 'Run Setup Checklist' after running the SQL to confirm tables are available.")
+
+                test_cols = st.columns([1, 3])
+                with test_cols[0]:
+                    if st.button("Test Supabase Connection", key="community_supabase_test"):
+                        ok, err = supabase_check_table(
+                            community_settings,
+                            "community_posts",
+                            use_service_key=community_use_service_role(community_settings),
+                            auth_token=community_auth_token(community_settings)
+                        )
+                        if ok:
+                            st.success("Supabase connection OK.")
+                        else:
+                            st.error(f"Supabase test failed: {err}")
+
+                st.markdown("### Migration Helper")
+                st.caption("Detect and generate SQL for new columns (reserve + buy now + images + grading + auth ownership fields).")
+                if "community_migration_results" not in st.session_state:
+                    st.session_state.community_migration_results = None
+                if st.button("Check for missing columns", key="community_migration_check"):
+                    migration_results = supabase_check_columns(
+                        community_settings,
+                        "community_posts",
+                        list(COMMUNITY_POSTS_EXTRA_COLUMNS.keys()),
+                        use_service_key=community_use_service_role(community_settings),
+                        auth_token=community_auth_token(community_settings)
+                    )
+                    st.session_state.community_migration_results = {
+                        "results": migration_results,
+                        "checked_at": datetime.now().isoformat()
+                    }
+                if st.session_state.community_migration_results:
+                    render_checklist_results(
+                        st.session_state.community_migration_results["results"],
+                        st.session_state.community_migration_results.get("checked_at")
+                    )
+                    st.session_state.community_column_support = {
+                        col: ok for col, ok, _ in st.session_state.community_migration_results["results"]
+                    }
+                    missing = [
+                        col for col, ok, err in st.session_state.community_migration_results["results"]
+                        if not ok and is_supabase_missing_column_error(err)
+                    ]
+                    if missing:
+                        st.info("Run this SQL in Supabase SQL Editor to add missing columns:")
+                        migration_sql = build_community_migration_sql(missing)
+                        st.code(migration_sql, language="sql")
+                        st.download_button(
+                            "Download migration SQL",
+                            data=migration_sql,
+                            file_name="community_posts_migration.sql"
+                        )
+                        st.caption("After running the SQL, refresh this page and re-run the column check.")
+                    else:
+                        st.success("No missing columns detected.")
+    # ==============================
 # TAB 11: ADMIN
 # ==============================
 if admin_tab is not None:
