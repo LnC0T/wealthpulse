@@ -9,6 +9,12 @@ WealthPulse is a Streamlit app for tracking assets, liabilities, and wealth plan
 - Community marketplace with listings, watchlist, auctions, and messaging
 - Analytics, charts, and buy/sell signals
 
+## Screenshots
+![WealthPulse Dashboard](docs/screenshot-dashboard.svg)
+![Community Market](docs/screenshot-community.svg)
+
+Replace the placeholder images in `docs/` with real screenshots before launch.
+
 ## Local Run
 ```bash
 python3 -m venv .venv
@@ -55,6 +61,9 @@ SMTP_USE_TLS = true
 ## Notes
 - `wealth_data.json` and `remember_me.json` are local and ignored by git.
 - For production, use HTTPS and store keys in secrets.
+
+## License
+See `LICENSE` for terms.
 
 ## Support
 Email: wealthpulse@outlook.co.nz
